@@ -412,6 +412,10 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false); // Varsayılan kapalı
   const [viewMode, setViewMode] = useState(true); // true = sadece görüntüleme (read-only), false = düzenleme
   
+  // Pinch-to-Zoom State'i
+  const [lastPinchDistance, setLastPinchDistance] = useState(null);
+  const [isPinching, setIsPinching] = useState(false);
+  
   // Çizim State'i
   const [currentDrawingState, setCurrentDrawingState] = useState(null); // { startX, startY, type: 'circle'/'rectangle' }
   const [currentPolyline, setCurrentPolyline] = useState([]); 
@@ -1270,6 +1274,82 @@ const App = () => {
     return { clientX, clientY };
   };
 
+  // İki parmak arası mesafeyi hesapla
+  const getPinchDistance = (touches) => {
+    if (touches.length < 2) return null;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  // İki parmak ortasını hesapla
+  const getPinchCenter = (touches, rect) => {
+    if (touches.length < 2) return null;
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
+      y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top
+    };
+  };
+
+  // Touch Start Handler
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      // İki parmak - Pinch zoom başlat
+      e.preventDefault();
+      const distance = getPinchDistance(e.touches);
+      setLastPinchDistance(distance);
+      setIsPinching(true);
+      setIsDragging(false);
+    } else if (e.touches.length === 1) {
+      // Tek parmak - Normal işlem
+      setIsPinching(false);
+      handleMouseDown(e);
+    }
+  };
+
+  // Touch Move Handler
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 2 && isPinching) {
+      // Pinch zoom
+      e.preventDefault();
+      const rect = canvasRef.current.getBoundingClientRect();
+      const newDistance = getPinchDistance(e.touches);
+      const center = getPinchCenter(e.touches, rect);
+      
+      if (lastPinchDistance && newDistance && center) {
+        const scaleFactor = newDistance / lastPinchDistance;
+        
+        // Zoom merkezi etrafında scale
+        const worldX = toWorldX(center.x);
+        const worldY = toWorldY(center.y);
+        
+        const newScale = Math.max(0.001, Math.min(1000, scale * scaleFactor));
+        
+        // Yeni offset hesapla (zoom merkezi sabit kalacak şekilde)
+        const newOffsetX = center.x - (worldX * newScale);
+        const newOffsetY = center.y - (-worldY * newScale);
+        
+        setScale(newScale);
+        setOffset({ x: newOffsetX, y: newOffsetY });
+        setLastPinchDistance(newDistance);
+      }
+    } else if (e.touches.length === 1 && !isPinching) {
+      // Tek parmak - Normal hareket
+      handleMouseMove(e);
+    }
+  };
+
+  // Touch End Handler
+  const handleTouchEnd = (e) => {
+    if (e.touches.length < 2) {
+      setIsPinching(false);
+      setLastPinchDistance(null);
+    }
+    if (e.touches.length === 0) {
+      handleMouseUp(e);
+    }
+  };
+
   const handleMouseDown = (e) => {
     const { clientX, clientY } = getEventCoordinates(e);
     const rect = canvasRef.current.getBoundingClientRect();
@@ -1828,11 +1908,11 @@ const App = () => {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={() => { setIsDragging(false); setIsSelectionDragging(false); setSelectionRect(null); setSelectionMode(null); }}
+          onMouseLeave={() => { setIsDragging(false); setIsSelectionDragging(false); setSelectionRect(null); setSelectionMode(null); setIsPinching(false); }}
           onDoubleClick={handleDoubleClick}
-          onTouchStart={handleMouseDown}
-          onTouchMove={handleMouseMove}
-          onTouchEnd={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           className="w-full h-full block touch-none"
         />
       </div>
