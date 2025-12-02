@@ -48,8 +48,11 @@ const SNAP_TOLERANCE_PX = 10; // Yakalama hassasiyeti (piksel cinsinden)
 const parseDxfSimple = (dxfString) => {
   const lines = dxfString.split(/\r?\n/);
   const entities = [];
+  const blocks = new Map(); // BLOCK tanımları
   let currentEntity = null;
   let isEntitySection = false;
+  let isBlockSection = false;
+  let currentBlock = null;
   let currentVertexX = null;
 
   // Entity'yi kaydetmeden önce doğrula
@@ -62,31 +65,125 @@ const parseDxfSimple = (dxfString) => {
           !isNaN(currentEntity.x1) && !isNaN(currentEntity.y1) &&
           !isNaN(currentEntity.x2) && !isNaN(currentEntity.y2)) {
         if (currentEntity.x1 !== currentEntity.x2 || currentEntity.y1 !== currentEntity.y2) {
-          entities.push(currentEntity);
+          if (isBlockSection && currentBlock) {
+            currentBlock.entities.push(currentEntity);
+          } else {
+            entities.push(currentEntity);
+          }
         }
       }
     }
     else if (currentEntity.type === 'CIRCLE') {
       if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
           currentEntity.r !== undefined && currentEntity.r > 0) {
-        entities.push(currentEntity);
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
       }
     }
     else if (currentEntity.type === 'ARC') {
       if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
           currentEntity.r !== undefined && currentEntity.r > 0) {
-        entities.push(currentEntity);
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
       }
     }
-    else if (currentEntity.type === 'LWPOLYLINE') {
+    else if (currentEntity.type === 'LWPOLYLINE' || currentEntity.type === 'POLYLINE') {
       if (currentEntity.vertices && currentEntity.vertices.length >= 2) {
-        entities.push(currentEntity);
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
       }
     }
-    else if (currentEntity.type === 'TEXT' || currentEntity.type === 'MTEXT') {
+    else if (currentEntity.type === 'TEXT' || currentEntity.type === 'MTEXT' || currentEntity.type === 'ATTRIB' || currentEntity.type === 'ATTDEF') {
       if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
           currentEntity.text && currentEntity.text.length > 0) {
-        entities.push(currentEntity);
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'INSERT') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined && currentEntity.blockName) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'POINT') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'SOLID' || currentEntity.type === 'TRACE') {
+      if (currentEntity.x1 !== undefined && currentEntity.y1 !== undefined) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'ELLIPSE') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'SPLINE') {
+      if (currentEntity.controlPoints && currentEntity.controlPoints.length >= 2) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'HATCH') {
+      // Hatch'i kaydet (basit sınır çizgisi olarak)
+      if (currentEntity.boundaryPaths && currentEntity.boundaryPaths.length > 0) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'DIMENSION') {
+      // Dimension'ı basit çizgi olarak kaydet
+      if (currentEntity.x1 !== undefined && currentEntity.y1 !== undefined) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'LEADER') {
+      if (currentEntity.vertices && currentEntity.vertices.length >= 2) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
       }
     }
   };
@@ -101,8 +198,15 @@ const parseDxfSimple = (dxfString) => {
       continue;
     }
     
+    // BLOCKS Section kontrolü
+    if (code === 2 && value === 'BLOCKS') {
+      isBlockSection = true;
+      continue;
+    }
+    
     // Section kontrolü
     if (code === 2 && value === 'ENTITIES') {
+      isBlockSection = false;
       isEntitySection = true;
       continue;
     }
@@ -111,10 +215,44 @@ const parseDxfSimple = (dxfString) => {
         saveCurrentEntity();
         isEntitySection = false;
       }
+      if (isBlockSection) {
+        if (currentBlock) {
+          blocks.set(currentBlock.name, currentBlock);
+        }
+        isBlockSection = false;
+        currentBlock = null;
+      }
       continue;
     }
     
-    if (!isEntitySection) continue;
+    // BLOCK tanımı başlangıcı
+    if (isBlockSection && code === 0 && value === 'BLOCK') {
+      if (currentBlock) {
+        blocks.set(currentBlock.name, currentBlock);
+      }
+      currentBlock = { name: '', baseX: 0, baseY: 0, entities: [] };
+      continue;
+    }
+    
+    // BLOCK tanımı sonu
+    if (isBlockSection && code === 0 && value === 'ENDBLK') {
+      saveCurrentEntity();
+      currentEntity = null;
+      if (currentBlock && currentBlock.name) {
+        blocks.set(currentBlock.name, currentBlock);
+      }
+      currentBlock = { name: '', baseX: 0, baseY: 0, entities: [] };
+      continue;
+    }
+    
+    // BLOCK ismi ve base point
+    if (isBlockSection && currentBlock && !currentEntity) {
+      if (code === 2) currentBlock.name = value;
+      else if (code === 10) currentBlock.baseX = parseFloat(value);
+      else if (code === 20) currentBlock.baseY = parseFloat(value);
+    }
+    
+    if (!isEntitySection && !isBlockSection) continue;
     
     // Entity tipi (kod 0)
     if (code === 0) {
@@ -134,11 +272,55 @@ const parseDxfSimple = (dxfString) => {
       else if (value === 'LWPOLYLINE') {
         currentEntity = { type: 'LWPOLYLINE', layer: '0', id: crypto.randomUUID(), vertices: [], closed: false };
       }
+      else if (value === 'POLYLINE') {
+        currentEntity = { type: 'POLYLINE', layer: '0', id: crypto.randomUUID(), vertices: [], closed: false };
+      }
+      else if (value === 'VERTEX') {
+        // POLYLINE vertex'i - mevcut entity'ye ekle
+        if (currentEntity && currentEntity.type === 'POLYLINE') {
+          // Vertex bilgileri sonraki satırlarda gelecek
+        }
+      }
+      else if (value === 'SEQEND') {
+        // POLYLINE sonu
+        saveCurrentEntity();
+        currentEntity = null;
+      }
       else if (value === 'TEXT') {
         currentEntity = { type: 'TEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0 };
       }
       else if (value === 'MTEXT') {
-        currentEntity = { type: 'MTEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0 };
+        currentEntity = { type: 'MTEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0, width: 0 };
+      }
+      else if (value === 'ATTRIB') {
+        currentEntity = { type: 'ATTRIB', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0, tag: '' };
+      }
+      else if (value === 'ATTDEF') {
+        currentEntity = { type: 'ATTDEF', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0, tag: '' };
+      }
+      else if (value === 'INSERT') {
+        currentEntity = { type: 'INSERT', layer: '0', id: crypto.randomUUID(), blockName: '', x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+      }
+      else if (value === 'POINT') {
+        currentEntity = { type: 'POINT', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'SOLID' || value === 'TRACE') {
+        currentEntity = { type: value, layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'ELLIPSE') {
+        currentEntity = { type: 'ELLIPSE', layer: '0', id: crypto.randomUUID(), x: 0, y: 0, majorX: 1, majorY: 0, ratio: 1, startAngle: 0, endAngle: Math.PI * 2 };
+      }
+      else if (value === 'SPLINE') {
+        currentEntity = { type: 'SPLINE', layer: '0', id: crypto.randomUUID(), controlPoints: [], degree: 3 };
+      }
+      else if (value === 'HATCH') {
+        currentEntity = { type: 'HATCH', layer: '0', id: crypto.randomUUID(), boundaryPaths: [], patternName: 'SOLID' };
+      }
+      else if (value === 'DIMENSION') {
+        currentEntity = { type: 'DIMENSION', layer: '0', id: crypto.randomUUID(), dimType: 0 };
+      }
+      else if (value === 'LEADER') {
+        currentEntity = { type: 'LEADER', layer: '0', id: crypto.randomUUID(), vertices: [] };
       }
       continue;
     }
@@ -188,6 +370,22 @@ const parseDxfSimple = (dxfString) => {
         currentVertexX = null;
       }
     }
+    // POLYLINE (eski format)
+    else if (currentEntity.type === 'POLYLINE') {
+      if (code === 70) {
+        currentEntity.closed = (parseInt(value) & 1) === 1;
+      }
+      else if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          currentEntity.vertices.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
+    }
     // TEXT
     else if (currentEntity.type === 'TEXT') {
       if (code === 10) currentEntity.x = parseFloat(value);
@@ -195,6 +393,9 @@ const parseDxfSimple = (dxfString) => {
       else if (code === 40) currentEntity.height = parseFloat(value);
       else if (code === 50) currentEntity.rotation = parseFloat(value);
       else if (code === 1) currentEntity.text = value;
+      else if (code === 7) currentEntity.style = value; // Text style
+      else if (code === 72) currentEntity.hAlign = parseInt(value); // Horizontal alignment
+      else if (code === 73) currentEntity.vAlign = parseInt(value); // Vertical alignment
     }
     // MTEXT
     else if (currentEntity.type === 'MTEXT') {
@@ -202,13 +403,215 @@ const parseDxfSimple = (dxfString) => {
       else if (code === 20) currentEntity.y = parseFloat(value);
       else if (code === 40) currentEntity.height = parseFloat(value);
       else if (code === 50) currentEntity.rotation = parseFloat(value);
+      else if (code === 41) currentEntity.width = parseFloat(value);
+      else if (code === 71) currentEntity.attachmentPoint = parseInt(value);
       else if (code === 1) currentEntity.text = value;
       else if (code === 3) currentEntity.text = (currentEntity.text || '') + value; // MTEXT devam satırları
+    }
+    // ATTRIB (Block attribute)
+    else if (currentEntity.type === 'ATTRIB' || currentEntity.type === 'ATTDEF') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.height = parseFloat(value);
+      else if (code === 50) currentEntity.rotation = parseFloat(value);
+      else if (code === 1) currentEntity.text = value;
+      else if (code === 2) currentEntity.tag = value;
+      else if (code === 7) currentEntity.style = value;
+    }
+    // INSERT (Block reference)
+    else if (currentEntity.type === 'INSERT') {
+      if (code === 2) currentEntity.blockName = value;
+      else if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 41) currentEntity.scaleX = parseFloat(value);
+      else if (code === 42) currentEntity.scaleY = parseFloat(value);
+      else if (code === 50) currentEntity.rotation = parseFloat(value);
+    }
+    // POINT
+    else if (currentEntity.type === 'POINT') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+    }
+    // SOLID / TRACE
+    else if (currentEntity.type === 'SOLID' || currentEntity.type === 'TRACE') {
+      if (code === 10) currentEntity.x1 = parseFloat(value);
+      else if (code === 20) currentEntity.y1 = parseFloat(value);
+      else if (code === 11) currentEntity.x2 = parseFloat(value);
+      else if (code === 21) currentEntity.y2 = parseFloat(value);
+      else if (code === 12) currentEntity.x3 = parseFloat(value);
+      else if (code === 22) currentEntity.y3 = parseFloat(value);
+      else if (code === 13) currentEntity.x4 = parseFloat(value);
+      else if (code === 23) currentEntity.y4 = parseFloat(value);
+    }
+    // ELLIPSE
+    else if (currentEntity.type === 'ELLIPSE') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 11) currentEntity.majorX = parseFloat(value);
+      else if (code === 21) currentEntity.majorY = parseFloat(value);
+      else if (code === 40) currentEntity.ratio = parseFloat(value);
+      else if (code === 41) currentEntity.startAngle = parseFloat(value);
+      else if (code === 42) currentEntity.endAngle = parseFloat(value);
+    }
+    // SPLINE
+    else if (currentEntity.type === 'SPLINE') {
+      if (code === 71) currentEntity.degree = parseInt(value);
+      else if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          currentEntity.controlPoints.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
+    }
+    // DIMENSION
+    else if (currentEntity.type === 'DIMENSION') {
+      if (code === 10) currentEntity.x1 = parseFloat(value);
+      else if (code === 20) currentEntity.y1 = parseFloat(value);
+      else if (code === 11) currentEntity.x2 = parseFloat(value);
+      else if (code === 21) currentEntity.y2 = parseFloat(value);
+      else if (code === 13) currentEntity.x3 = parseFloat(value);
+      else if (code === 23) currentEntity.y3 = parseFloat(value);
+      else if (code === 14) currentEntity.x4 = parseFloat(value);
+      else if (code === 24) currentEntity.y4 = parseFloat(value);
+      else if (code === 70) currentEntity.dimType = parseInt(value);
+      else if (code === 1) currentEntity.text = value;
+    }
+    // LEADER
+    else if (currentEntity.type === 'LEADER') {
+      if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          currentEntity.vertices.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
     }
   }
   
   saveCurrentEntity();
-  return entities;
+  
+  // INSERT'leri çöz - block entity'lerini ana listeye ekle
+  const resolvedEntities = [];
+  const processEntities = (ents, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1, rotation = 0) => {
+    for (const ent of ents) {
+      if (ent.type === 'INSERT' && blocks.has(ent.blockName)) {
+        const block = blocks.get(ent.blockName);
+        const insX = ent.x || 0;
+        const insY = ent.y || 0;
+        const insScaleX = (ent.scaleX || 1) * scaleX;
+        const insScaleY = (ent.scaleY || 1) * scaleY;
+        const insRotation = (ent.rotation || 0) + rotation;
+        
+        // Block entity'lerini transform ederek ekle
+        for (const blockEnt of block.entities) {
+          const transformedEnt = transformEntity(blockEnt, insX, insY, insScaleX, insScaleY, insRotation, block.baseX, block.baseY);
+          if (transformedEnt) {
+            resolvedEntities.push(transformedEnt);
+          }
+        }
+      } else if (ent.type !== 'INSERT') {
+        resolvedEntities.push(ent);
+      }
+    }
+  };
+  
+  processEntities(entities);
+  return resolvedEntities.length > 0 ? resolvedEntities : entities;
+};
+
+// Entity'yi transform et (INSERT için)
+const transformEntity = (ent, offsetX, offsetY, scaleX, scaleY, rotation, baseX = 0, baseY = 0) => {
+  const rad = (rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  
+  const transformPoint = (x, y) => {
+    // Base point'i çıkar, scale uygula, rotate et, offset ekle
+    const px = (x - baseX) * scaleX;
+    const py = (y - baseY) * scaleY;
+    return {
+      x: px * cos - py * sin + offsetX,
+      y: px * sin + py * cos + offsetY
+    };
+  };
+  
+  const newEnt = { ...ent, id: crypto.randomUUID() };
+  
+  if (ent.type === 'LINE') {
+    const p1 = transformPoint(ent.x1, ent.y1);
+    const p2 = transformPoint(ent.x2, ent.y2);
+    newEnt.x1 = p1.x; newEnt.y1 = p1.y;
+    newEnt.x2 = p2.x; newEnt.y2 = p2.y;
+  }
+  else if (ent.type === 'CIRCLE') {
+    const p = transformPoint(ent.x, ent.y);
+    newEnt.x = p.x; newEnt.y = p.y;
+    newEnt.r = ent.r * Math.abs(scaleX); // Assume uniform scale for circle
+  }
+  else if (ent.type === 'ARC') {
+    const p = transformPoint(ent.x, ent.y);
+    newEnt.x = p.x; newEnt.y = p.y;
+    newEnt.r = ent.r * Math.abs(scaleX);
+    newEnt.startAngle = (ent.startAngle || 0) + rotation;
+    newEnt.endAngle = (ent.endAngle || 360) + rotation;
+  }
+  else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
+    newEnt.vertices = ent.vertices.map(v => transformPoint(v.x, v.y));
+  }
+  else if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'ATTRIB' || ent.type === 'ATTDEF') {
+    const p = transformPoint(ent.x, ent.y);
+    newEnt.x = p.x; newEnt.y = p.y;
+    newEnt.height = (ent.height || 2.5) * Math.abs(scaleY);
+    newEnt.rotation = (ent.rotation || 0) + rotation;
+  }
+  else if (ent.type === 'POINT') {
+    const p = transformPoint(ent.x, ent.y);
+    newEnt.x = p.x; newEnt.y = p.y;
+  }
+  else if (ent.type === 'ELLIPSE') {
+    const p = transformPoint(ent.x, ent.y);
+    newEnt.x = p.x; newEnt.y = p.y;
+    newEnt.majorX = ent.majorX * scaleX;
+    newEnt.majorY = ent.majorY * scaleY;
+  }
+  else if (ent.type === 'SPLINE') {
+    newEnt.controlPoints = ent.controlPoints.map(v => transformPoint(v.x, v.y));
+  }
+  else if (ent.type === 'SOLID' || ent.type === 'TRACE') {
+    const p1 = transformPoint(ent.x1, ent.y1);
+    const p2 = transformPoint(ent.x2, ent.y2);
+    const p3 = transformPoint(ent.x3 || ent.x2, ent.y3 || ent.y2);
+    const p4 = transformPoint(ent.x4 || ent.x3 || ent.x2, ent.y4 || ent.y3 || ent.y2);
+    newEnt.x1 = p1.x; newEnt.y1 = p1.y;
+    newEnt.x2 = p2.x; newEnt.y2 = p2.y;
+    newEnt.x3 = p3.x; newEnt.y3 = p3.y;
+    newEnt.x4 = p4.x; newEnt.y4 = p4.y;
+  }
+  else if (ent.type === 'LEADER') {
+    newEnt.vertices = ent.vertices.map(v => transformPoint(v.x, v.y));
+  }
+  else if (ent.type === 'DIMENSION') {
+    if (ent.x1 !== undefined) {
+      const p1 = transformPoint(ent.x1, ent.y1);
+      newEnt.x1 = p1.x; newEnt.y1 = p1.y;
+    }
+    if (ent.x2 !== undefined) {
+      const p2 = transformPoint(ent.x2, ent.y2);
+      newEnt.x2 = p2.x; newEnt.y2 = p2.y;
+    }
+  }
+  else {
+    return null; // Bilinmeyen tip
+  }
+  
+  return newEnt;
 };
 
 // ============================================
@@ -234,18 +637,50 @@ const getEntityBounds = (ent) => {
       updateBounds(ent.x - ent.r, ent.y - ent.r);
       updateBounds(ent.x + ent.r, ent.y + ent.r);
     }
-    else if (ent.type === 'LWPOLYLINE') {
-      ent.vertices.forEach(v => updateBounds(v.x, v.y));
+    else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
+      if (ent.vertices) {
+        ent.vertices.forEach(v => updateBounds(v.x, v.y));
+      }
     }
     else if (ent.type === 'RECTANGLE') {
         updateBounds(ent.x1, ent.y1);
         updateBounds(ent.x2, ent.y2);
     }
-    else if (ent.type === 'TEXT' || ent.type === 'MTEXT') {
+    else if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'ATTRIB' || ent.type === 'ATTDEF') {
       // Yazı için yaklaşık bounds hesapla
-      const textWidth = (ent.text?.length || 1) * ent.height * 0.6;
+      const textWidth = (ent.text?.length || 1) * (ent.height || 2.5) * 0.6;
       updateBounds(ent.x, ent.y);
-      updateBounds(ent.x + textWidth, ent.y + ent.height);
+      updateBounds(ent.x + textWidth, ent.y + (ent.height || 2.5));
+    }
+    else if (ent.type === 'POINT') {
+      updateBounds(ent.x, ent.y);
+    }
+    else if (ent.type === 'SOLID' || ent.type === 'TRACE') {
+      updateBounds(ent.x1, ent.y1);
+      updateBounds(ent.x2, ent.y2);
+      if (ent.x3 !== undefined) updateBounds(ent.x3, ent.y3);
+      if (ent.x4 !== undefined) updateBounds(ent.x4, ent.y4);
+    }
+    else if (ent.type === 'ELLIPSE') {
+      const majorLength = Math.sqrt(ent.majorX * ent.majorX + ent.majorY * ent.majorY);
+      updateBounds(ent.x - majorLength, ent.y - majorLength);
+      updateBounds(ent.x + majorLength, ent.y + majorLength);
+    }
+    else if (ent.type === 'SPLINE') {
+      if (ent.controlPoints) {
+        ent.controlPoints.forEach(v => updateBounds(v.x, v.y));
+      }
+    }
+    else if (ent.type === 'LEADER') {
+      if (ent.vertices) {
+        ent.vertices.forEach(v => updateBounds(v.x, v.y));
+      }
+    }
+    else if (ent.type === 'DIMENSION') {
+      if (ent.x1 !== undefined) updateBounds(ent.x1, ent.y1);
+      if (ent.x2 !== undefined) updateBounds(ent.x2, ent.y2);
+      if (ent.x3 !== undefined) updateBounds(ent.x3, ent.y3);
+      if (ent.x4 !== undefined) updateBounds(ent.x4, ent.y4);
     }
     
     // Geçerli sınırlar bulunamazsa varsayılan döndür
@@ -1029,13 +1464,15 @@ const App = () => {
             true
         );
       }
-      else if (entity.type === 'LWPOLYLINE' && entity.vertices.length > 0) {
-        ctx.moveTo(toScreenX(entity.vertices[0].x), toScreenY(entity.vertices[0].y));
-        for (let i = 1; i < entity.vertices.length; i++) {
-            ctx.lineTo(toScreenX(entity.vertices[i].x), toScreenY(entity.vertices[i].y));
-        }
-        if (entity.closed) {
-            ctx.closePath();
+      else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
+        if (entity.vertices && entity.vertices.length > 0) {
+          ctx.moveTo(toScreenX(entity.vertices[0].x), toScreenY(entity.vertices[0].y));
+          for (let i = 1; i < entity.vertices.length; i++) {
+              ctx.lineTo(toScreenX(entity.vertices[i].x), toScreenY(entity.vertices[i].y));
+          }
+          if (entity.closed) {
+              ctx.closePath();
+          }
         }
       }
       else if (entity.type === 'RECTANGLE') {
@@ -1051,7 +1488,7 @@ const App = () => {
         
         ctx.rect(rectX, rectY, rectW, rectH);
       }
-      else if (entity.type === 'TEXT' || entity.type === 'MTEXT') {
+      else if (entity.type === 'TEXT' || entity.type === 'MTEXT' || entity.type === 'ATTRIB' || entity.type === 'ATTDEF') {
         // Yazı için stroke yerine fill kullanacağız
         const screenX = toScreenX(entity.x);
         const screenY = toScreenY(entity.y);
@@ -1074,7 +1511,7 @@ const App = () => {
         
         // MTEXT formatlarını temizle (\\P = satır sonu, vb.)
         let displayText = entity.text || '';
-        displayText = displayText.replace(/\\P/g, '\n').replace(/\\[^;]+;/g, '');
+        displayText = displayText.replace(/\\P/g, '\n').replace(/\\[^;]+;/g, '').replace(/\{|\}/g, '');
         
         // Çok satırlı yazı desteği
         const lines = displayText.split('\n');
@@ -1086,6 +1523,119 @@ const App = () => {
         
         // TEXT için stroke atla
         return;
+      }
+      else if (entity.type === 'POINT') {
+        // Nokta - küçük çarpı işareti olarak çiz
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const pointSize = Math.max(3, 5 / scale);
+        
+        ctx.moveTo(screenX - pointSize, screenY - pointSize);
+        ctx.lineTo(screenX + pointSize, screenY + pointSize);
+        ctx.moveTo(screenX + pointSize, screenY - pointSize);
+        ctx.lineTo(screenX - pointSize, screenY + pointSize);
+      }
+      else if (entity.type === 'SOLID' || entity.type === 'TRACE') {
+        // Solid/Trace - dolu dörtgen
+        ctx.moveTo(toScreenX(entity.x1), toScreenY(entity.y1));
+        ctx.lineTo(toScreenX(entity.x2), toScreenY(entity.y2));
+        if (entity.x3 !== undefined) {
+          ctx.lineTo(toScreenX(entity.x3), toScreenY(entity.y3));
+        }
+        if (entity.x4 !== undefined) {
+          ctx.lineTo(toScreenX(entity.x4), toScreenY(entity.y4));
+        }
+        ctx.closePath();
+        ctx.fillStyle = isSelected ? '#fbbf2480' : '#60a5fa40';
+        ctx.fill();
+      }
+      else if (entity.type === 'ELLIPSE') {
+        // Elips
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const majorLength = Math.sqrt(entity.majorX * entity.majorX + entity.majorY * entity.majorY) * scale;
+        const minorLength = majorLength * (entity.ratio || 0.5);
+        const rotation = Math.atan2(entity.majorY, entity.majorX);
+        
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(-rotation);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, majorLength, minorLength, 0, entity.startAngle || 0, entity.endAngle || Math.PI * 2);
+        ctx.restore();
+      }
+      else if (entity.type === 'SPLINE') {
+        // Spline - kontrol noktalarından geçen eğri (basitleştirilmiş)
+        if (entity.controlPoints && entity.controlPoints.length >= 2) {
+          ctx.moveTo(toScreenX(entity.controlPoints[0].x), toScreenY(entity.controlPoints[0].y));
+          
+          if (entity.controlPoints.length === 2) {
+            ctx.lineTo(toScreenX(entity.controlPoints[1].x), toScreenY(entity.controlPoints[1].y));
+          } else if (entity.controlPoints.length === 3) {
+            ctx.quadraticCurveTo(
+              toScreenX(entity.controlPoints[1].x), toScreenY(entity.controlPoints[1].y),
+              toScreenX(entity.controlPoints[2].x), toScreenY(entity.controlPoints[2].y)
+            );
+          } else {
+            // Bezier eğrisi ile yaklaşık çiz
+            for (let i = 1; i < entity.controlPoints.length - 2; i += 3) {
+              const p1 = entity.controlPoints[i];
+              const p2 = entity.controlPoints[i + 1];
+              const p3 = entity.controlPoints[Math.min(i + 2, entity.controlPoints.length - 1)];
+              ctx.bezierCurveTo(
+                toScreenX(p1.x), toScreenY(p1.y),
+                toScreenX(p2.x), toScreenY(p2.y),
+                toScreenX(p3.x), toScreenY(p3.y)
+              );
+            }
+          }
+        }
+      }
+      else if (entity.type === 'LEADER') {
+        // Leader - ok işaretli çizgi
+        if (entity.vertices && entity.vertices.length >= 2) {
+          ctx.moveTo(toScreenX(entity.vertices[0].x), toScreenY(entity.vertices[0].y));
+          for (let i = 1; i < entity.vertices.length; i++) {
+            ctx.lineTo(toScreenX(entity.vertices[i].x), toScreenY(entity.vertices[i].y));
+          }
+          
+          // Ok ucu çiz
+          if (entity.vertices.length >= 2) {
+            const lastIdx = entity.vertices.length - 1;
+            const endX = toScreenX(entity.vertices[0].x);
+            const endY = toScreenY(entity.vertices[0].y);
+            const prevX = toScreenX(entity.vertices[1].x);
+            const prevY = toScreenY(entity.vertices[1].y);
+            
+            const angle = Math.atan2(endY - prevY, endX - prevX);
+            const arrowSize = 8;
+            
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - arrowSize * Math.cos(angle + Math.PI / 6), endY - arrowSize * Math.sin(angle + Math.PI / 6));
+          }
+        }
+      }
+      else if (entity.type === 'DIMENSION') {
+        // Dimension - basit çizgi olarak göster
+        if (entity.x1 !== undefined && entity.x2 !== undefined) {
+          ctx.moveTo(toScreenX(entity.x1), toScreenY(entity.y1));
+          ctx.lineTo(toScreenX(entity.x2), toScreenY(entity.y2));
+        }
+        if (entity.x3 !== undefined && entity.x4 !== undefined) {
+          ctx.moveTo(toScreenX(entity.x3), toScreenY(entity.y3));
+          ctx.lineTo(toScreenX(entity.x4), toScreenY(entity.y4));
+        }
+        // Dimension text
+        if (entity.text) {
+          const midX = entity.x2 !== undefined ? (entity.x1 + entity.x2) / 2 : entity.x1;
+          const midY = entity.y2 !== undefined ? (entity.y1 + entity.y2) / 2 : entity.y1;
+          const fontSize = Math.max(10, 2.5 * scale);
+          ctx.font = `${fontSize}px Arial`;
+          ctx.fillStyle = isSelected ? '#fbbf24' : '#e0e0e0';
+          ctx.fillText(entity.text, toScreenX(midX), toScreenY(midY));
+        }
       }
       
       ctx.stroke();
