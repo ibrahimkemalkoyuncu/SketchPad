@@ -146,10 +146,35 @@ button:active {
   to { transform: translateX(0); opacity: 1; }
 }
 
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }
 
 .animate-slide-in {
   animation: slideIn 0.3s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* Safe area for mobile devices with notch/home indicator */
+.safe-area-pb {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+/* Touch feedback improvements */
+@media (hover: none) and (pointer: coarse) {
+  button, label, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  button:active, label:active {
+    transform: scale(0.95);
+  }
 }

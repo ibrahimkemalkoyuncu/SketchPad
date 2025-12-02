@@ -373,15 +373,16 @@ const ToolButton = ({ icon: Icon, active, onClick, title, disabled = false }) =>
       background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
       boxShadow: '0 0 20px rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
     } : {}}
-    className={`p-2 md:p-3 rounded-lg transition-all duration-300 mb-2 touch-manipulation relative overflow-hidden group
+    className={`p-3 md:p-3 rounded-xl transition-all duration-300 touch-manipulation relative overflow-hidden group
+      min-w-[44px] min-h-[44px] flex items-center justify-center
       ${active 
         ? 'text-white scale-105' 
-        : 'bg-gray-700/80 backdrop-blur-sm text-gray-300 hover:bg-gray-600/90 hover:text-white hover:shadow-md border border-gray-600/30 hover:border-gray-500/50'
+        : 'bg-gray-700/80 backdrop-blur-sm text-gray-300 hover:bg-gray-600/90 hover:text-white hover:shadow-md border border-gray-600/30 hover:border-gray-500/50 active:bg-gray-500/90 active:scale-95'
       }
       ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:scale-105'}
       `}
   >
-    <Icon size={18} className={`md:w-5 md:h-5 transition-transform duration-300 ${active ? '' : 'group-hover:rotate-12'}`} />
+    <Icon size={20} className={`transition-transform duration-300 ${active ? '' : 'group-hover:rotate-12'}`} />
   </button>
 );
 
@@ -1632,126 +1633,149 @@ const App = () => {
 
   return (
     <div 
-      className="flex flex-col md:flex-row h-screen overflow-hidden font-sans text-gray-200" 
+      className="flex flex-col h-screen overflow-hidden font-sans text-gray-200" 
       style={{background: 'linear-gradient(to bottom right, #111827, #111827, #1f2937)'}} 
       onContextMenu={(e) => e.preventDefault()}
     >
       
-      {/* TOOLBAR - Mobilde üstte yatay, masaüstünde solda dikey */}
-      <div className="w-full md:w-16 bg-gray-800/95 backdrop-blur-sm border-b md:border-b-0 md:border-r border-gray-700/50 flex md:flex-col items-center justify-around md:justify-start px-2 py-2 md:py-4 z-20 overflow-x-auto md:overflow-x-visible shadow-xl">
-        <div className="mb-0 md:mb-6 p-2 rounded-lg shadow-lg transition-all duration-300" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'}}><span className="font-bold text-white text-xs tracking-wider">DXF</span></div>
-        
-        {/* Undo / Redo Butonları (Faz 1.3) */}
-        <ToolButton 
-            icon={CornerUpLeft} 
-            title="Geri Al (Ctrl+Z)" 
-            onClick={handleUndo} 
-            disabled={!canUndo} 
-        />
-        <ToolButton 
-            icon={CornerUpRight} 
-            title="Yinele (Ctrl+Y)" 
-            onClick={handleRedo} 
-            disabled={!canRedo} 
-        />
-        <div className="hidden md:block h-px w-8 bg-gray-600 my-2"></div>
-
-        <ToolButton icon={MousePointer2} title="Seç/Kaydır" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
-        
-        {/* Seçili nesneleri sil (Delete tuşu) */}
-        <ToolButton 
-          icon={Trash2} 
-          title={`Seçili Nesneleri Sil (${selectedEntities.size} seçili)`}
-          onClick={() => {
-            if (selectedEntities.size > 0) {
-              const remainingEntities = entities.filter(entity => !selectedEntities.has(entity.id));
-              setEntities(remainingEntities);
-              setSelectedEntities(new Set());
-              addToHistory(remainingEntities);
-            }
-          }}
-          disabled={selectedEntities.size === 0}
-        />
-        
-        <ToolButton icon={Maximize} title="Ekrana Sığdır (Fit to Screen)" onClick={() => fitToScreen()} />
-        <ToolButton icon={ZoomIn} title="Yakınlaştır" onClick={() => setScale(s => s * 1.2)} />
-        <ToolButton icon={ZoomOut} title="Uzaklaştır" onClick={() => setScale(s => s / 1.2)} />
-        <div className="hidden md:block h-px w-8 bg-gray-600 my-2"></div>
-        
-        {/* Polyline Çizim Aracı (Faz 2.1) */}
-        <ToolButton 
-            icon={PenTool} 
-            title="Polyline Çiz (Sağ Tık İptal, Çift Tık Bitir)" 
-            active={activeTool === 'polyline'} 
-            onClick={() => { 
-                // Eğer polyline zaten aktifse, iptal et
-                if (activeTool === 'polyline') {
-                    cancelActiveDrawing();
-                } else {
-                    setActiveTool('polyline');
-                    setCurrentDrawingState(null); // İlk tıklama handleMouseDown'da yapılacak
-                }
-            }} 
-        />
-        
-        {/* Rectangle Çizim Aracı (Faz 2.1) */}
-        <ToolButton 
-            icon={Square} 
-            title="Dikdörtgen Çiz (2 Tıkla: Başlangıç/Bitiş)" 
-            active={activeTool === 'rectangle'} 
-            onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
-        />
-
-        {/* Circle Çizim Aracı (Faz 2.1) */}
-        <ToolButton 
-            icon={Circle} 
-            title="Daire Çiz (2 Tıkla: Merkez/Yarıçap)" 
-            active={activeTool === 'circle'} 
-            onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
-        />
-
-        {/* Polyline'ı Bitir Butonu */}
-        {currentPolyline.length > 0 && activeTool === 'polyline' && (
-            <button 
-                title="Çizimi Bitir (Çift Tıklama Veya Bu Buton)"
-                onClick={finishPolyline}
-                className="p-2 md:mt-1 rounded-lg text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300"
-                style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
-            >
-                <PlusCircle size={18} className="md:w-5 md:h-5" />
-            </button>
-        )}
-        
-        <div className="md:mt-auto flex flex-col gap-1 md:gap-2">
-             {/* Grid Toggle (F7) */}
-             <ToolButton 
-                icon={Grid3x3} 
-                title="Grid Açma/Kapatma (F7)" 
-                active={gridVisible} 
-                onClick={() => setGridVisible(prev => !prev)} 
-              />
-             
-             {/* Snap Toggle (F3/F9) */}
-             <ToolButton 
-                icon={Magnet} 
-                title="Snap Açma/Kapatma (F3)" 
-                active={snapEnabled} 
-                onClick={() => setSnapEnabled(prev => !prev)} 
-              />
-             
-             {/* DXF/DWG Dosya Yükleme */}
-             <label className="cursor-pointer p-2 md:p-3 rounded-lg text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="CAD Dosyası Yükle (DXF/DWG)">
-                <Upload size={18} className="md:w-5 md:h-5" />
-                <input 
-                  type="file" 
-                  accept=".dxf,.dwg" 
-                  className="hidden" 
-                  onChange={handleFileUpload} 
-                  onClick={(e) => { e.target.value = null; }} 
-                />
-             </label>
+      {/* HEADER - Sadece mobilde görünür, logo ve menu */}
+      <div className="md:hidden flex items-center justify-between px-3 py-2 bg-gray-800/95 backdrop-blur-sm border-b border-gray-700/50 z-30">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg shadow-lg" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}}>
+            <span className="font-bold text-white text-xs tracking-wider">DXF</span>
+          </div>
+          <span className="text-xs text-gray-400">E:{entities.length} S:{selectedEntities.size}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Zoom info */}
+          <span className="text-xs text-gray-400 bg-gray-700/50 px-2 py-1 rounded">Z:{scale.toFixed(1)}</span>
+          {/* Menu butonu */}
+          <button 
+            onClick={() => setSidebarOpen(true)} 
+            className="p-2.5 bg-gray-700/80 rounded-lg text-gray-300 active:bg-gray-600 touch-manipulation"
+          >
+            <Menu size={20} />
+          </button>
         </div>
       </div>
+      
+      {/* ANA İÇERİK - Canvas ve Desktop Toolbar */}
+      <div className="flex flex-1 min-h-0 md:flex-row">
+        
+        {/* TOOLBAR - Masaüstünde solda dikey */}
+        <div className="hidden md:flex w-16 bg-gray-800/95 backdrop-blur-sm border-r border-gray-700/50 flex-col items-center py-4 z-20 shadow-xl">
+          <div className="mb-6 p-2 rounded-lg shadow-lg transition-all duration-300" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'}}><span className="font-bold text-white text-xs tracking-wider">DXF</span></div>
+        
+          {/* Undo / Redo Butonları (Faz 1.3) */}
+          <ToolButton 
+              icon={CornerUpLeft} 
+              title="Geri Al (Ctrl+Z)" 
+              onClick={handleUndo} 
+              disabled={!canUndo} 
+          />
+          <ToolButton 
+              icon={CornerUpRight} 
+              title="Yinele (Ctrl+Y)" 
+              onClick={handleRedo} 
+              disabled={!canRedo} 
+          />
+          <div className="h-px w-8 bg-gray-600 my-2"></div>
+
+          <ToolButton icon={MousePointer2} title="Seç/Kaydır" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
+          
+          {/* Seçili nesneleri sil (Delete tuşu) */}
+          <ToolButton 
+            icon={Trash2} 
+            title={`Seçili Nesneleri Sil (${selectedEntities.size} seçili)`}
+            onClick={() => {
+              if (selectedEntities.size > 0) {
+                const remainingEntities = entities.filter(entity => !selectedEntities.has(entity.id));
+                setEntities(remainingEntities);
+                setSelectedEntities(new Set());
+                addToHistory(remainingEntities);
+              }
+            }}
+            disabled={selectedEntities.size === 0}
+          />
+          
+          <ToolButton icon={Maximize} title="Ekrana Sığdır (Fit to Screen)" onClick={() => fitToScreen()} />
+          <ToolButton icon={ZoomIn} title="Yakınlaştır" onClick={() => setScale(s => s * 1.2)} />
+          <ToolButton icon={ZoomOut} title="Uzaklaştır" onClick={() => setScale(s => s / 1.2)} />
+          <div className="h-px w-8 bg-gray-600 my-2"></div>
+        
+          {/* Polyline Çizim Aracı (Faz 2.1) */}
+          <ToolButton 
+              icon={PenTool} 
+              title="Polyline Çiz (Sağ Tık İptal, Çift Tık Bitir)" 
+              active={activeTool === 'polyline'} 
+              onClick={() => { 
+                  if (activeTool === 'polyline') {
+                      cancelActiveDrawing();
+                  } else {
+                      setActiveTool('polyline');
+                      setCurrentDrawingState(null);
+                  }
+              }} 
+          />
+          
+          {/* Rectangle Çizim Aracı (Faz 2.1) */}
+          <ToolButton 
+              icon={Square} 
+              title="Dikdörtgen Çiz (2 Tıkla: Başlangıç/Bitiş)" 
+              active={activeTool === 'rectangle'} 
+              onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+          />
+
+          {/* Circle Çizim Aracı (Faz 2.1) */}
+          <ToolButton 
+              icon={Circle} 
+              title="Daire Çiz (2 Tıkla: Merkez/Yarıçap)" 
+              active={activeTool === 'circle'} 
+              onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+          />
+
+          {/* Polyline'ı Bitir Butonu */}
+          {currentPolyline.length > 0 && activeTool === 'polyline' && (
+              <button 
+                  title="Çizimi Bitir (Çift Tıklama Veya Bu Buton)"
+                  onClick={finishPolyline}
+                  className="p-3 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
+              >
+                  <PlusCircle size={20} />
+              </button>
+          )}
+          
+          <div className="mt-auto flex flex-col gap-2">
+               {/* Grid Toggle (F7) */}
+               <ToolButton 
+                  icon={Grid3x3} 
+                  title="Grid Açma/Kapatma (F7)" 
+                  active={gridVisible} 
+                  onClick={() => setGridVisible(prev => !prev)} 
+                />
+               
+               {/* Snap Toggle (F3/F9) */}
+               <ToolButton 
+                  icon={Magnet} 
+                  title="Snap Açma/Kapatma (F3)" 
+                  active={snapEnabled} 
+                  onClick={() => setSnapEnabled(prev => !prev)} 
+                />
+               
+               {/* DXF/DWG Dosya Yükleme */}
+               <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl min-w-[44px] min-h-[44px]" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="CAD Dosyası Yükle (DXF/DWG)">
+                  <Upload size={20} />
+                  <input 
+                    type="file" 
+                    accept=".dxf,.dwg" 
+                    className="hidden" 
+                    onChange={handleFileUpload} 
+                    onClick={(e) => { e.target.value = null; }} 
+                  />
+               </label>
+          </div>
+        </div>
 
       {/* CANVAS */}
       <div 
@@ -1761,16 +1785,16 @@ const App = () => {
           cursor: canvasCursor
         }}
       >
-        <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-gray-800/90 backdrop-blur-md px-2 py-1 md:px-4 md:py-2 rounded-lg border border-gray-700/50 text-[10px] md:text-xs text-gray-300 pointer-events-none select-none z-10 max-w-[90vw] md:max-w-none overflow-hidden shadow-xl">
-          <div className="hidden md:inline">Ent: {entities.length + (currentPolyline.length > 0 ? 1 : 0)} | Seçili: {selectedEntities.size} | Zoom: {scale.toExponential(2)} | World X: {mouseWorldPos.x.toFixed(2)} Y: {mouseWorldPos.y.toFixed(2)}</div>
-          <div className="md:hidden">E:{entities.length} S:{selectedEntities.size} Z:{scale.toFixed(1)}</div>
-          {!gridVisible && <span className="ml-1 md:ml-3 font-semibold text-gray-500">| GRID:OFF</span>}
-          {!snapEnabled && <span className="ml-1 md:ml-3 font-semibold text-gray-500">| SNAP:OFF</span>}
-          {activeSnap && snapEnabled && <span className="text-yellow-400 ml-1 md:ml-3 font-semibold">| {activeSnap.type}</span>}
-          {isOrthoMode && <span className="ml-1 md:ml-3 font-bold text-cyan-400 animate-pulse">| ORTHO</span>}
-          {selectionMode && <span className={`ml-1 md:ml-3 font-semibold ${selectionMode === 'window' ? 'text-blue-400' : 'text-green-400'}`}>| {selectionMode === 'window' ? 'W' : 'C'}</span>}
-          {currentDrawingState && <span className="ml-1 md:ml-3 font-semibold text-red-400">| {currentDrawingState.type.toUpperCase()}</span>}
-          {(currentPolyline.length > 0 || currentDrawingState) && <span className="ml-1 md:ml-3 text-orange-400 animate-pulse">| ESC: İptal</span>}
+        {/* Desktop info bar */}
+        <div className="hidden md:block absolute top-4 left-4 bg-gray-800/90 backdrop-blur-md px-4 py-2 rounded-lg border border-gray-700/50 text-xs text-gray-300 pointer-events-none select-none z-10 shadow-xl">
+          <span>Ent: {entities.length + (currentPolyline.length > 0 ? 1 : 0)} | Seçili: {selectedEntities.size} | Zoom: {scale.toExponential(2)} | World X: {mouseWorldPos.x.toFixed(2)} Y: {mouseWorldPos.y.toFixed(2)}</span>
+          {!gridVisible && <span className="ml-3 font-semibold text-gray-500">| GRID:OFF</span>}
+          {!snapEnabled && <span className="ml-3 font-semibold text-gray-500">| SNAP:OFF</span>}
+          {activeSnap && snapEnabled && <span className="text-yellow-400 ml-3 font-semibold">| {activeSnap.type}</span>}
+          {isOrthoMode && <span className="ml-3 font-bold text-cyan-400 animate-pulse">| ORTHO</span>}
+          {selectionMode && <span className={`ml-3 font-semibold ${selectionMode === 'window' ? 'text-blue-400' : 'text-green-400'}`}>| {selectionMode === 'window' ? 'W' : 'C'}</span>}
+          {currentDrawingState && <span className="ml-3 font-semibold text-red-400">| {currentDrawingState.type.toUpperCase()}</span>}
+          {(currentPolyline.length > 0 || currentDrawingState) && <span className="ml-3 text-orange-400 animate-pulse">| ESC: İptal</span>}
         </div>
         
         <canvas
@@ -1788,16 +1812,22 @@ const App = () => {
         />
       </div>
 
-      {/* SIDEBAR - Mobilde overlay, masaüstünde normal */}
+      {/* SIDEBAR - Mobilde slide-in panel, masaüstünde normal */}
       {sidebarOpen && (
-        <div className="fixed md:relative inset-y-0 right-0 w-full md:w-64 bg-gray-800/95 backdrop-blur-md border-l border-gray-700/50 flex flex-col z-30 shadow-2xl transform transition-transform duration-300 animate-fade-in">
-          <div className="p-3 md:p-4 border-b border-gray-700/50 flex justify-between items-center" style={{background: 'linear-gradient(90deg, rgba(51, 65, 85, 0.5) 0%, rgba(55, 65, 81, 0.3) 100%)'}}>
-            <h2 className="font-semibold text-xs md:text-sm" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>PROJE YÖNETİCİSİ</h2>
-            <button onClick={() => setSidebarOpen(false)} className="p-1 hover:bg-gray-700 rounded touch-manipulation"><X size={20} /></button>
-          </div>
-          <div className="p-3 md:p-4 overflow-y-auto flex-1">
+        <>
+          {/* Mobilde arkaplan overlay */}
+          <div 
+            className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <div className="fixed md:relative inset-y-0 right-0 w-[85%] max-w-[320px] md:w-64 md:max-w-none bg-gray-800/98 backdrop-blur-md border-l border-gray-700/50 flex flex-col z-40 md:z-30 shadow-2xl transform transition-transform duration-300 animate-slide-in-right">
+            <div className="p-4 border-b border-gray-700/50 flex justify-between items-center" style={{background: 'linear-gradient(90deg, rgba(51, 65, 85, 0.5) 0%, rgba(55, 65, 81, 0.3) 100%)'}}>
+              <h2 className="font-semibold text-sm" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>PROJE YÖNETİCİSİ</h2>
+              <button onClick={() => setSidebarOpen(false)} className="p-2 hover:bg-gray-700 active:bg-gray-600 rounded-lg touch-manipulation"><X size={22} /></button>
+            </div>
+          <div className="p-4 overflow-y-auto flex-1">
             {/* GEMINI ÖZELLİKLERİ */}
-            <div className="mb-4 md:mb-6 border-b border-gray-700 pb-3 md:pb-4">
+            <div className="mb-6 border-b border-gray-700 pb-4">
                 <div className="flex items-center gap-2 mb-3"><Sparkles size={16} className="text-pink-400 animate-pulse" /><h3 className="text-sm font-medium" style={{background: 'linear-gradient(90deg, #f472b6 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>AI Analiz Araçları</h3></div>
                 <button 
                     onClick={async () => {
@@ -1953,43 +1983,122 @@ const App = () => {
                 </button>
             </div>
             {/* KATMAN YÖNETİMİ */}
-            <div className="mb-4 md:mb-6">
-                <div className="flex items-center gap-2 mb-2 md:mb-3"><Layers size={16} className="text-blue-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Katmanlar ({layers.size})</h3></div>
-                <div className="space-y-1">
+            <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3"><Layers size={16} className="text-blue-400" /><h3 className="text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Katmanlar ({layers.size})</h3></div>
+                <div className="space-y-1.5">
                     {Array.from(layers).map(layer => (
-                        <div key={layer} onClick={() => toggleLayer(layer)} className={`flex items-center gap-2 md:gap-3 p-2 rounded-lg cursor-pointer text-xs transition-all duration-200 touch-manipulation active:scale-95 ${hiddenLayers.has(layer) ? 'opacity-50 grayscale' : 'bg-gray-700/50 hover:bg-gray-600/70 hover:shadow-md hover:translate-x-1'}`}>
+                        <div key={layer} onClick={() => toggleLayer(layer)} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer text-sm transition-all duration-200 touch-manipulation active:scale-95 ${hiddenLayers.has(layer) ? 'opacity-50 grayscale' : 'bg-gray-700/50 hover:bg-gray-600/70 hover:shadow-md'}`}>
                             <div className={`w-3 h-3 rounded-full ${hiddenLayers.has(layer) ? 'bg-gray-500' : 'bg-green-500'}`}></div>
-                            <span>{layer}</span>
+                            <span className="truncate">{layer}</span>
                         </div>
                     ))}
                 </div>
             </div>
             
             {/* SEÇİLİ NESNE BİLGİSİ */}
-            <div className="border-t border-gray-700/50 pt-3 md:pt-4 mb-4 md:mb-6">
-                <div className="flex items-center gap-2 mb-2 md:mb-3"><MousePointer2 size={16} className="text-yellow-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #fbbf24 0%, #fb923c 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Seçili Nesneler</h3></div>
-                <p className="text-xs text-gray-300">
+            <div className="border-t border-gray-700/50 pt-4 mb-6">
+                <div className="flex items-center gap-2 mb-3"><MousePointer2 size={16} className="text-yellow-400" /><h3 className="text-sm font-medium" style={{background: 'linear-gradient(90deg, #fbbf24 0%, #fb923c 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Seçili Nesneler</h3></div>
+                <p className="text-sm text-gray-300">
                     Toplam <span className="font-semibold text-yellow-400">{selectedEntities.size}</span> nesne seçili.
-                    {selectedEntities.size > 0 && <button onClick={() => setSelectedEntities(new Set())} className="ml-2 text-red-400 hover:text-red-300 underline hover:no-underline transition-all">Seçimi Kaldır</button>}
+                    {selectedEntities.size > 0 && <button onClick={() => setSelectedEntities(new Set())} className="ml-2 text-red-400 hover:text-red-300 underline hover:no-underline transition-all touch-manipulation">Seçimi Kaldır</button>}
                 </p>
             </div>
 
-            <div className="border-t border-gray-700/50 pt-3 md:pt-4">
-                <div className="flex items-center gap-2 mb-2 md:mb-3"><Save size={16} className="text-blue-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>İşlemler</h3></div>
-                <button className="w-full text-white text-xs py-2.5 md:py-2 px-3 md:px-4 rounded-lg touch-manipulation shadow-lg transition-all duration-300" style={{background: 'linear-gradient(90deg, #2563eb 0%, #06b6d4 100%)'}}>JSON Olarak Aktar</button>
+            <div className="border-t border-gray-700/50 pt-4">
+                <div className="flex items-center gap-2 mb-3"><Save size={16} className="text-blue-400" /><h3 className="text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>İşlemler</h3></div>
+                <button className="w-full text-white text-sm py-3 px-4 rounded-lg touch-manipulation shadow-lg transition-all duration-300 active:scale-95" style={{background: 'linear-gradient(90deg, #2563eb 0%, #06b6d4 100%)'}}>JSON Olarak Aktar</button>
             </div>
           </div>
         </div>
+        </>
       )}
-      {/* Sidebar kapalıyken açma butonu */}
+      {/* Sidebar kapalıyken açma butonu - sadece desktop */}
       {!sidebarOpen && 
         <button 
           onClick={() => setSidebarOpen(true)} 
-          className="fixed top-2 right-2 md:absolute md:top-4 md:right-4 p-2.5 md:p-2 bg-gray-800/95 backdrop-blur-sm rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-600 transition-all duration-300 z-20 shadow-xl hover:shadow-glow border border-gray-700/50 touch-manipulation"
+          className="hidden md:block fixed md:absolute top-4 right-4 p-2 bg-gray-800/95 backdrop-blur-sm rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-600 transition-all duration-300 z-20 shadow-xl hover:shadow-glow border border-gray-700/50 touch-manipulation"
         >
           <Menu size={22} />
         </button>
       }
+      
+      {/* MOBİL ALT TOOLBAR */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800/98 backdrop-blur-md border-t border-gray-700/50 px-2 py-2 z-20 safe-area-pb">
+        <div className="flex items-center justify-around gap-1">
+          {/* Seç */}
+          <ToolButton icon={MousePointer2} title="Seç" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
+          
+          {/* Fit */}
+          <ToolButton icon={Maximize} title="Sığdır" onClick={() => fitToScreen()} />
+          
+          {/* Polyline */}
+          <ToolButton 
+              icon={PenTool} 
+              title="Polyline" 
+              active={activeTool === 'polyline'} 
+              onClick={() => { 
+                  if (activeTool === 'polyline') {
+                      cancelActiveDrawing();
+                  } else {
+                      setActiveTool('polyline');
+                      setCurrentDrawingState(null);
+                  }
+              }} 
+          />
+          
+          {/* Rectangle */}
+          <ToolButton 
+              icon={Square} 
+              title="Dikdörtgen" 
+              active={activeTool === 'rectangle'} 
+              onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+          />
+
+          {/* Circle */}
+          <ToolButton 
+              icon={Circle} 
+              title="Daire" 
+              active={activeTool === 'circle'} 
+              onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+          />
+          
+          {/* Grid */}
+          <ToolButton 
+            icon={Grid3x3} 
+            title="Grid" 
+            active={gridVisible} 
+            onClick={() => setGridVisible(prev => !prev)} 
+          />
+          
+          {/* Upload */}
+          <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-[44px] min-h-[44px] active:scale-95" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
+            <Upload size={20} />
+            <input 
+              type="file" 
+              accept=".dxf,.dwg" 
+              className="hidden" 
+              onChange={handleFileUpload} 
+              onClick={(e) => { e.target.value = null; }} 
+            />
+          </label>
+        </div>
+        
+        {/* Polyline bitirme butonu */}
+        {currentPolyline.length > 0 && activeTool === 'polyline' && (
+          <div className="mt-2 flex justify-center">
+            <button 
+                title="Çizimi Bitir"
+                onClick={finishPolyline}
+                className="px-6 py-2.5 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 flex items-center gap-2 text-sm font-medium"
+                style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
+            >
+                <PlusCircle size={18} />
+                Çizimi Bitir
+            </button>
+          </div>
+        )}
+      </div>
+      </div>
       
       {/* MODAL KOMPONENTİ */}
       {showModal && (
