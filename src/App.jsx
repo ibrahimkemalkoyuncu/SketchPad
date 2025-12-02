@@ -29,6 +29,9 @@ import {
   Grid3x3, // Grid ikonu (F7)
   Magnet, // Snap ikonu (F3)
   Trash2, // Sil ikonu (Delete)
+  Eye, // Görüntüleme modu
+  EyeOff, // Düzenleme modu
+  MoreHorizontal, // Menü butonu (...)
 } from 'lucide-react';
 
 // ============================================
@@ -406,7 +409,8 @@ const App = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const [activeTool, setActiveTool] = useState('select'); // 'select', 'polyline', 'circle', 'rectangle'
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Varsayılan kapalı
+  const [viewMode, setViewMode] = useState(true); // true = sadece görüntüleme (read-only), false = düzenleme
   
   // Çizim State'i
   const [currentDrawingState, setCurrentDrawingState] = useState(null); // { startX, startY, type: 'circle'/'rectangle' }
@@ -1281,6 +1285,16 @@ const App = () => {
     const button = e.button !== undefined ? e.button : 0;
     const isTouchEvent = e.type.startsWith('touch');
     
+    // ViewMode aktifken sadece pan'a izin ver
+    if (viewMode) {
+      // İki parmakla veya orta tık ile pan
+      if (button === 1 || isTouchEvent) {
+        setIsDragging(true);
+        setLastMousePos({ x: clientX, y: clientY });
+      }
+      return;
+    }
+    
     if (button === 1 || (activeTool === 'select' && button !== 0 && !isTouchEvent)) {
         setIsDragging(true);
         setLastMousePos({ x: clientX, y: clientY });
@@ -1644,17 +1658,28 @@ const App = () => {
           <div className="p-1.5 rounded-lg shadow-lg" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}}>
             <span className="font-bold text-white text-xs tracking-wider">DXF</span>
           </div>
-          <span className="text-xs text-gray-400">E:{entities.length} S:{selectedEntities.size}</span>
+          <span className="text-xs text-gray-400">E:{entities.length}</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Zoom info */}
-          <span className="text-xs text-gray-400 bg-gray-700/50 px-2 py-1 rounded">Z:{scale.toFixed(1)}</span>
-          {/* Menu butonu */}
+          {/* Görüntüleme/Düzenleme Modu Toggle */}
+          <button 
+            onClick={() => setViewMode(prev => !prev)} 
+            className={`p-2.5 rounded-lg touch-manipulation transition-all duration-300 ${
+              viewMode 
+                ? 'bg-blue-600 text-white shadow-lg' 
+                : 'bg-orange-500 text-white shadow-lg'
+            }`}
+            title={viewMode ? "Görüntüleme Modu (Tıkla: Düzenleme)" : "Düzenleme Modu (Tıkla: Görüntüleme)"}
+          >
+            {viewMode ? <Eye size={18} /> : <EyeOff size={18} />}
+          </button>
+          {/* Proje Yöneticisi butonu (...) */}
           <button 
             onClick={() => setSidebarOpen(true)} 
             className="p-2.5 bg-gray-700/80 rounded-lg text-gray-300 active:bg-gray-600 touch-manipulation"
+            title="Proje Yöneticisi"
           >
-            <Menu size={20} />
+            <MoreHorizontal size={20} />
           </button>
         </div>
       </div>
@@ -2017,85 +2042,142 @@ const App = () => {
         <button 
           onClick={() => setSidebarOpen(true)} 
           className="hidden md:block fixed md:absolute top-4 right-4 p-2 bg-gray-800/95 backdrop-blur-sm rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-600 transition-all duration-300 z-20 shadow-xl hover:shadow-glow border border-gray-700/50 touch-manipulation"
+          title="Proje Yöneticisi"
         >
-          <Menu size={22} />
+          <MoreHorizontal size={22} />
         </button>
       }
       
-      {/* MOBİL ALT TOOLBAR */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800/98 backdrop-blur-md border-t border-gray-700/50 px-2 py-2 z-20 safe-area-pb">
-        <div className="flex items-center justify-around gap-1">
-          {/* Seç */}
-          <ToolButton icon={MousePointer2} title="Seç" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
-          
-          {/* Fit */}
-          <ToolButton icon={Maximize} title="Sığdır" onClick={() => fitToScreen()} />
-          
-          {/* Polyline */}
-          <ToolButton 
-              icon={PenTool} 
-              title="Polyline" 
-              active={activeTool === 'polyline'} 
-              onClick={() => { 
-                  if (activeTool === 'polyline') {
-                      cancelActiveDrawing();
-                  } else {
-                      setActiveTool('polyline');
-                      setCurrentDrawingState(null);
-                  }
-              }} 
-          />
-          
-          {/* Rectangle */}
-          <ToolButton 
-              icon={Square} 
-              title="Dikdörtgen" 
-              active={activeTool === 'rectangle'} 
-              onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
-          />
-
-          {/* Circle */}
-          <ToolButton 
-              icon={Circle} 
-              title="Daire" 
-              active={activeTool === 'circle'} 
-              onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
-          />
-          
-          {/* Grid */}
-          <ToolButton 
-            icon={Grid3x3} 
-            title="Grid" 
-            active={gridVisible} 
-            onClick={() => setGridVisible(prev => !prev)} 
-          />
-          
-          {/* Upload */}
-          <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-[44px] min-h-[44px] active:scale-95" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
-            <Upload size={20} />
-            <input 
-              type="file" 
-              accept=".dxf,.dwg" 
-              className="hidden" 
-              onChange={handleFileUpload} 
-              onClick={(e) => { e.target.value = null; }} 
-            />
-          </label>
-        </div>
-        
-        {/* Polyline bitirme butonu */}
-        {currentPolyline.length > 0 && activeTool === 'polyline' && (
-          <div className="mt-2 flex justify-center">
+      {/* MOBİL ALT TOOLBAR - Basitleştirilmiş */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800/98 backdrop-blur-md border-t border-gray-700/50 px-3 py-3 z-20 safe-area-pb">
+        {viewMode ? (
+          /* GÖRÜNTÜLEME MODU - Sadece temel araçlar */
+          <div className="flex items-center justify-around gap-2">
+            {/* Sığdır */}
             <button 
-                title="Çizimi Bitir"
-                onClick={finishPolyline}
-                className="px-6 py-2.5 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 flex items-center gap-2 text-sm font-medium"
-                style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
+              onClick={() => fitToScreen()}
+              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation transition-all"
+              title="Ekrana Sığdır"
             >
-                <PlusCircle size={18} />
-                Çizimi Bitir
+              <Maximize size={20} />
+              <span className="text-sm font-medium">Sığdır</span>
             </button>
+            
+            {/* Yakınlaştır */}
+            <button 
+              onClick={() => setScale(s => s * 1.5)}
+              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-[48px]"
+              title="Yakınlaştır"
+            >
+              <ZoomIn size={22} />
+            </button>
+            
+            {/* Uzaklaştır */}
+            <button 
+              onClick={() => setScale(s => s / 1.5)}
+              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-[48px]"
+              title="Uzaklaştır"
+            >
+              <ZoomOut size={22} />
+            </button>
+            
+            {/* Dosya Yükle */}
+            <label className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white active:scale-95 touch-manipulation cursor-pointer transition-all" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
+              <Upload size={20} />
+              <span className="text-sm font-medium">Yükle</span>
+              <input 
+                type="file" 
+                accept=".dxf,.dwg" 
+                className="hidden" 
+                onChange={handleFileUpload} 
+                onClick={(e) => { e.target.value = null; }} 
+              />
+            </label>
           </div>
+        ) : (
+          /* DÜZENLEME MODU - Çizim araçları */
+          <>
+            <div className="flex items-center justify-around gap-1">
+              {/* Seç */}
+              <ToolButton icon={MousePointer2} title="Seç" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
+              
+              {/* Sığdır */}
+              <ToolButton icon={Maximize} title="Sığdır" onClick={() => fitToScreen()} />
+              
+              {/* Polyline */}
+              <ToolButton 
+                  icon={PenTool} 
+                  title="Polyline" 
+                  active={activeTool === 'polyline'} 
+                  onClick={() => { 
+                      if (activeTool === 'polyline') {
+                          cancelActiveDrawing();
+                      } else {
+                          setActiveTool('polyline');
+                          setCurrentDrawingState(null);
+                      }
+                  }} 
+              />
+              
+              {/* Rectangle */}
+              <ToolButton 
+                  icon={Square} 
+                  title="Dikdörtgen" 
+                  active={activeTool === 'rectangle'} 
+                  onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+              />
+
+              {/* Circle */}
+              <ToolButton 
+                  icon={Circle} 
+                  title="Daire" 
+                  active={activeTool === 'circle'} 
+                  onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+              />
+              
+              {/* Sil */}
+              <ToolButton 
+                  icon={Trash2} 
+                  title="Sil" 
+                  disabled={selectedEntities.size === 0}
+                  onClick={() => {
+                    if (selectedEntities.size > 0) {
+                      const remainingEntities = entities.filter(entity => !selectedEntities.has(entity.id));
+                      setEntities(remainingEntities);
+                      setSelectedEntities(new Set());
+                      addToHistory(remainingEntities);
+                    }
+                  }} 
+              />
+              
+              {/* Upload */}
+              <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-[44px] min-h-[44px] active:scale-95" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
+                <Upload size={20} />
+                <input 
+                  type="file" 
+                  accept=".dxf,.dwg" 
+                  className="hidden" 
+                  onChange={handleFileUpload} 
+                  onClick={(e) => { e.target.value = null; }} 
+                />
+              </label>
+            </div>
+            
+            {/* Polyline bitirme butonu */}
+            {currentPolyline.length > 0 && activeTool === 'polyline' && (
+              <div className="mt-2 flex justify-center">
+                <button 
+                    title="Çizimi Bitir"
+                    onClick={finishPolyline}
+                    className="px-6 py-2.5 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 flex items-center gap-2 text-sm font-medium"
+                    style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
+                >
+                    <PlusCircle size={18} />
+                    Çizimi Bitir
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
       </div>
