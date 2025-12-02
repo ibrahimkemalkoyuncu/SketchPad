@@ -24,8 +24,11 @@ import {
   Minimize2, 
   CornerUpLeft, 
   CornerUpRight,
-  Circle, // Daire ikonu (Yeni)
-  Square, // Dikdörtgen ikonu (Yeni)
+  Circle, // Daire ikonu
+  Square, // Dikdörtgen ikonu
+  Grid3x3, // Grid ikonu (F7)
+  Magnet, // Snap ikonu (F3)
+  Trash2, // Sil ikonu (Delete)
 } from 'lucide-react';
 
 // ============================================
@@ -44,66 +47,164 @@ const parseDxfSimple = (dxfString) => {
   const entities = [];
   let currentEntity = null;
   let isEntitySection = false;
+  let currentVertexX = null;
 
-  // Dxf'den Entity'lerin temel verilerini ayıklar (LINE, CIRCLE, LWPOLYLINE, ARC)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-
-    if (line === 'ENTITIES') isEntitySection = true;
-    if (line === 'ENDSEC' && isEntitySection) isEntitySection = false;
-
-    if (isEntitySection) {
-      if (['LINE', 'CIRCLE', 'LWPOLYLINE', 'ARC'].includes(line)) {
-        if (currentEntity) entities.push(currentEntity);
-        
-        // Benzersiz ID ekleyelim
-        currentEntity = { type: line, layer: '0', id: crypto.randomUUID() };
-        
-        if (line === 'LWPOLYLINE') {
-          currentEntity.vertices = [];
-          currentEntity.closed = false;
-        }
-      } 
-      else if (currentEntity) {
-        const code = parseInt(line, 10);
-        const value = lines[i + 1]?.trim();
-        
-        if (code === 8) currentEntity.layer = value; // Layer Name
-
-        if (currentEntity.type === 'LINE') {
-          if (code === 10) currentEntity.x1 = parseFloat(value);
-          if (code === 20) currentEntity.y1 = parseFloat(value);
-          if (code === 11) currentEntity.x2 = parseFloat(value);
-          if (code === 21) currentEntity.y2 = parseFloat(value);
-        }
-        else if (currentEntity.type === 'CIRCLE') {
-          if (code === 10) currentEntity.x = parseFloat(value);
-          if (code === 20) currentEntity.y = parseFloat(value);
-          if (code === 40) currentEntity.r = parseFloat(value);
-        }
-        else if (currentEntity.type === 'ARC') {
-          if (code === 10) currentEntity.x = parseFloat(value);
-          if (code === 20) currentEntity.y = parseFloat(value);
-          if (code === 40) currentEntity.r = parseFloat(value);
-          if (code === 50) currentEntity.startAngle = parseFloat(value);
-          if (code === 51) currentEntity.endAngle = parseFloat(value);
-        }
-        else if (currentEntity.type === 'LWPOLYLINE') {
-          if (code === 70) {
-             currentEntity.closed = (parseInt(value) & 1) === 1;
-          }
-          if (code === 10) {
-             currentEntity.vertices.push({ x: parseFloat(value), y: 0 });
-          }
-          if (code === 20) {
-             const lastVertex = currentEntity.vertices[currentEntity.vertices.length - 1];
-             if (lastVertex) lastVertex.y = parseFloat(value);
-          }
+  // Entity'yi kaydetmeden önce doğrula
+  const saveCurrentEntity = () => {
+    if (!currentEntity) return;
+    
+    if (currentEntity.type === 'LINE') {
+      if (currentEntity.x1 !== undefined && currentEntity.y1 !== undefined &&
+          currentEntity.x2 !== undefined && currentEntity.y2 !== undefined &&
+          !isNaN(currentEntity.x1) && !isNaN(currentEntity.y1) &&
+          !isNaN(currentEntity.x2) && !isNaN(currentEntity.y2)) {
+        if (currentEntity.x1 !== currentEntity.x2 || currentEntity.y1 !== currentEntity.y2) {
+          entities.push(currentEntity);
         }
       }
     }
+    else if (currentEntity.type === 'CIRCLE') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          currentEntity.r !== undefined && currentEntity.r > 0) {
+        entities.push(currentEntity);
+      }
+    }
+    else if (currentEntity.type === 'ARC') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          currentEntity.r !== undefined && currentEntity.r > 0) {
+        entities.push(currentEntity);
+      }
+    }
+    else if (currentEntity.type === 'LWPOLYLINE') {
+      if (currentEntity.vertices && currentEntity.vertices.length >= 2) {
+        entities.push(currentEntity);
+      }
+    }
+    else if (currentEntity.type === 'TEXT' || currentEntity.type === 'MTEXT') {
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          currentEntity.text && currentEntity.text.length > 0) {
+        entities.push(currentEntity);
+      }
+    }
+  };
+
+  // DXF'i kod-değer çiftleri olarak parse et
+  for (let i = 0; i < lines.length - 1; i += 2) {
+    const code = parseInt(lines[i].trim(), 10);
+    const value = lines[i + 1]?.trim();
+    
+    if (isNaN(code) || value === undefined) {
+      i--; // Tek satır atla, çift olmayan satır olabilir
+      continue;
+    }
+    
+    // Section kontrolü
+    if (code === 2 && value === 'ENTITIES') {
+      isEntitySection = true;
+      continue;
+    }
+    if (code === 0 && value === 'ENDSEC') {
+      if (isEntitySection) {
+        saveCurrentEntity();
+        isEntitySection = false;
+      }
+      continue;
+    }
+    
+    if (!isEntitySection) continue;
+    
+    // Entity tipi (kod 0)
+    if (code === 0) {
+      saveCurrentEntity();
+      currentEntity = null;
+      currentVertexX = null;
+      
+      if (value === 'LINE') {
+        currentEntity = { type: 'LINE', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'CIRCLE') {
+        currentEntity = { type: 'CIRCLE', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'ARC') {
+        currentEntity = { type: 'ARC', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'LWPOLYLINE') {
+        currentEntity = { type: 'LWPOLYLINE', layer: '0', id: crypto.randomUUID(), vertices: [], closed: false };
+      }
+      else if (value === 'TEXT') {
+        currentEntity = { type: 'TEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0 };
+      }
+      else if (value === 'MTEXT') {
+        currentEntity = { type: 'MTEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0 };
+      }
+      continue;
+    }
+    
+    if (!currentEntity) continue;
+    
+    // Ortak: Layer (kod 8)
+    if (code === 8) {
+      currentEntity.layer = value;
+      continue;
+    }
+    
+    // LINE
+    if (currentEntity.type === 'LINE') {
+      if (code === 10) currentEntity.x1 = parseFloat(value);
+      else if (code === 20) currentEntity.y1 = parseFloat(value);
+      else if (code === 11) currentEntity.x2 = parseFloat(value);
+      else if (code === 21) currentEntity.y2 = parseFloat(value);
+    }
+    // CIRCLE
+    else if (currentEntity.type === 'CIRCLE') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.r = parseFloat(value);
+    }
+    // ARC
+    else if (currentEntity.type === 'ARC') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.r = parseFloat(value);
+      else if (code === 50) currentEntity.startAngle = parseFloat(value);
+      else if (code === 51) currentEntity.endAngle = parseFloat(value);
+    }
+    // LWPOLYLINE
+    else if (currentEntity.type === 'LWPOLYLINE') {
+      if (code === 70) {
+        currentEntity.closed = (parseInt(value) & 1) === 1;
+      }
+      else if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          currentEntity.vertices.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
+    }
+    // TEXT
+    else if (currentEntity.type === 'TEXT') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.height = parseFloat(value);
+      else if (code === 50) currentEntity.rotation = parseFloat(value);
+      else if (code === 1) currentEntity.text = value;
+    }
+    // MTEXT
+    else if (currentEntity.type === 'MTEXT') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.height = parseFloat(value);
+      else if (code === 50) currentEntity.rotation = parseFloat(value);
+      else if (code === 1) currentEntity.text = value;
+      else if (code === 3) currentEntity.text = (currentEntity.text || '') + value; // MTEXT devam satırları
+    }
   }
-  if (currentEntity) entities.push(currentEntity);
+  
+  saveCurrentEntity();
   return entities;
 };
 
@@ -133,9 +234,15 @@ const getEntityBounds = (ent) => {
     else if (ent.type === 'LWPOLYLINE') {
       ent.vertices.forEach(v => updateBounds(v.x, v.y));
     }
-    else if (ent.type === 'RECTANGLE') { // Yeni Dikdörtgen tipi
+    else if (ent.type === 'RECTANGLE') {
         updateBounds(ent.x1, ent.y1);
         updateBounds(ent.x2, ent.y2);
+    }
+    else if (ent.type === 'TEXT' || ent.type === 'MTEXT') {
+      // Yazı için yaklaşık bounds hesapla
+      const textWidth = (ent.text?.length || 1) * ent.height * 0.6;
+      updateBounds(ent.x, ent.y);
+      updateBounds(ent.x + textWidth, ent.y + ent.height);
     }
     
     // Geçerli sınırlar bulunamazsa varsayılan döndür
@@ -262,15 +369,19 @@ const ToolButton = ({ icon: Icon, active, onClick, title, disabled = false }) =>
     onClick={onClick}
     title={title}
     disabled={disabled}
-    className={`p-3 rounded-lg transition-all duration-200 mb-2 
+    style={active ? {
+      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+      boxShadow: '0 0 20px rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+    } : {}}
+    className={`p-2 md:p-3 rounded-lg transition-all duration-300 mb-2 touch-manipulation relative overflow-hidden group
       ${active 
-        ? 'bg-blue-600 text-white shadow-lg' 
-        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+        ? 'text-white scale-105' 
+        : 'bg-gray-700/80 backdrop-blur-sm text-gray-300 hover:bg-gray-600/90 hover:text-white hover:shadow-md border border-gray-600/30 hover:border-gray-500/50'
       }
-      ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
+      ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:scale-105'}
       `}
   >
-    <Icon size={20} />
+    <Icon size={18} className={`md:w-5 md:h-5 transition-transform duration-300 ${active ? '' : 'group-hover:rotate-12'}`} />
   </button>
 );
 
@@ -303,6 +414,13 @@ const App = () => {
   
   // Snap State'i
   const [activeSnap, setActiveSnap] = useState(null); 
+  const [snapEnabled, setSnapEnabled] = useState(true); // F3/F9 ile açma/kapatma
+  
+  // Grid State'i
+  const [gridVisible, setGridVisible] = useState(true); // F7 ile açma/kapatma
+  
+  // Ortogonal Mod (AutoCAD F8 / ALT tuşu)
+  const [isOrthoMode, setIsOrthoMode] = useState(false);
   
   // Seçim State'i
   const [selectedEntities, setSelectedEntities] = useState(new Set()); 
@@ -332,8 +450,25 @@ const App = () => {
   const toWorldX = (screenX) => (screenX - offset.x) / scale;
   const toWorldY = (screenY) => -(screenY - offset.y) / scale;
   
+  // Ortogonal koordinat hesaplama (AutoCAD F8 modu)
+  const applyOrthoMode = useCallback((currentX, currentY, baseX, baseY) => {
+    if (!isOrthoMode) return { x: currentX, y: currentY };
+    
+    const dx = Math.abs(currentX - baseX);
+    const dy = Math.abs(currentY - baseY);
+    
+    // Yatay mı dikey mi daha yakın?
+    if (dx > dy) {
+      // Yatay kilitle
+      return { x: currentX, y: baseY };
+    } else {
+      // Dikey kilitle
+      return { x: baseX, y: currentY };
+    }
+  }, [isOrthoMode]);
+  
   // Mesafe hesaplayıcı (Piksel cinsinden)
-  const distanceSq = (x1, y1, x2, y2) => (x1 - x2) ** 2 + (x1 - x2) ** 2;
+  const distanceSq = (x1, y1, x2, y2) => (x1 - x2) ** 2 + (y1 - y2) ** 2;
 
   // --- KOMUT YÖNETİMİ (Faz 1.3) ---
   const executeCommand = useCallback((command) => {
@@ -545,26 +680,105 @@ const App = () => {
     setOffset({ x: newOffsetX, y: newOffsetY });
   };
 
-  // --- DOSYA YÜKLEME HANDLER (Değişmedi) ---
+  // --- DOSYA YÜKLEME HANDLER ---
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
+    const fileName = file.name.toLowerCase();
+    const fileExtension = fileName.split('.').pop();
+
+    // DWG dosyası kontrolü
+    if (fileExtension === 'dwg') {
+      setModalTitle("DWG Formatı Desteklenmiyor");
+      setModalContent(
+        "DWG dosyaları ikili (binary) formatta olduğu için doğrudan açılamaz.\n\n" +
+        "Çözüm önerileri:\n" +
+        "• AutoCAD veya benzeri bir programda dosyayı DXF formatına çevirin\n" +
+        "• Online DWG to DXF dönüştürücü kullanın (örn: convertio.co, cloudconvert.com)\n" +
+        "• LibreCAD gibi ücretsiz bir yazılımla DXF'e kaydedin\n\n" +
+        "DXF formatındaki dosyayı yükleyebilirsiniz."
+      );
+      setShowModal(true);
+      return;
+    }
+
+    // DXF dosyası işleme
+    if (fileExtension !== 'dxf') {
+      setModalTitle("Desteklenmeyen Format");
+      setModalContent(`"${fileExtension}" formatı desteklenmiyor. Lütfen .dxf uzantılı bir dosya yükleyin.`);
+      setShowModal(true);
+      return;
+    }
+
+    // Türkçe karakter düzeltme fonksiyonu (Windows-1254 → UTF-8)
+    const fixTurkishChars = (text) => {
+      // DXF dosyalarında sık görülen Türkçe karakter sorunları
+      const replacements = {
+        '\u0080': 'Ç', '\u0081': 'ü', '\u0082': 'é', '\u0083': 'â',
+        '\u0084': 'ä', '\u0085': 'à', '\u0086': 'å', '\u0087': 'ç',
+        '\u0088': 'ê', '\u0089': 'ë', '\u008A': 'è', '\u008B': 'ï',
+        '\u008C': 'î', '\u008D': 'ı', '\u008E': 'Ä', '\u008F': 'Å',
+        '\u0090': 'É', '\u0091': 'æ', '\u0092': 'Æ', '\u0093': 'ô',
+        '\u0094': 'ö', '\u0095': 'ò', '\u0096': 'û', '\u0097': 'ù',
+        '\u0098': 'ÿ', '\u0099': 'Ö', '\u009A': 'Ü', '\u009B': 'ø',
+        '\u009C': '£', '\u009D': 'Ø', '\u009E': 'ş', '\u009F': 'Ş',
+        'Ý': 'İ', 'ý': 'ı', 'Þ': 'Ş', 'þ': 'ş', 
+        'Ð': 'Ğ', 'ð': 'ğ', 'Ü': 'Ü', 'ü': 'ü',
+        '\u00D0': 'Ğ', '\u00F0': 'ğ', '\u00DD': 'İ', '\u00FD': 'ı',
+        '\u00DE': 'Ş', '\u00FE': 'ş',
+      };
+      
+      let result = text;
+      for (const [from, to] of Object.entries(replacements)) {
+        result = result.split(from).join(to);
+      }
+      return result;
+    };
+
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target.result;
+      let text = e.target.result;
+      
+      // Türkçe karakter düzeltmesi uygula
+      text = fixTurkishChars(text);
+      
+      console.log('Dosya okundu, boyut:', text.length, 'karakter');
+      
       try {
         const parsedEntities = parseDxfSimple(text);
+        console.log('Parse edildi, entity sayısı:', parsedEntities.length);
         
-        const validEntities = parsedEntities.filter(e => {
-            if(e.type === 'LWPOLYLINE') return e.vertices.length > 1;
-            return true;
+        // Debug: Entity tiplerini say
+        const typeCounts = {};
+        parsedEntities.forEach(ent => {
+          typeCounts[ent.type] = (typeCounts[ent.type] || 0) + 1;
         });
-
-        const uniqueLayers = new Set(validEntities.map(e => e.layer || '0'));
+        console.log('Entity tipleri:', typeCounts);
         
-        setEntities(validEntities);
+        // Debug: İlk 5 LINE entity'sini göster
+        const lineEntities = parsedEntities.filter(e => e.type === 'LINE').slice(0, 5);
+        console.log('İlk 5 LINE:', lineEntities);
+        
+        // Debug: İlk 5 LWPOLYLINE entity'sini göster  
+        const polyEntities = parsedEntities.filter(e => e.type === 'LWPOLYLINE').slice(0, 5);
+        console.log('İlk 5 LWPOLYLINE:', polyEntities);
+        
+        if (parsedEntities.length === 0) {
+          setModalTitle("DXF Boş veya Desteklenmeyen");
+          setModalContent("Dosya okundu ancak desteklenen entity bulunamadı (LINE, CIRCLE, ARC, LWPOLYLINE).");
+          setShowModal(true);
+          return;
+        }
+        
+        // Parser zaten doğrulama yapıyor, ek filtre gerekmez
+        const uniqueLayers = new Set(parsedEntities.map(e => e.layer || '0'));
+        
+        setEntities(parsedEntities);
         setLayers(uniqueLayers);
+        
+        // Yükleme bilgisi
+        console.log(`DXF yüklendi: ${parsedEntities.length} entity, ${uniqueLayers.size} katman`);
         
         // Önceki analiz ve önerileri temizle
         setAnalysisReport(null);
@@ -579,7 +793,7 @@ const App = () => {
         setHistoryIndex(-1);
         
         // Yükleme sonrası hemen fit et
-        setTimeout(() => fitToScreen(validEntities), 100);
+        setTimeout(() => fitToScreen(parsedEntities), 100);
         
       } catch (err) {
         setModalTitle("DXF Parse Hatası");
@@ -588,7 +802,9 @@ const App = () => {
         console.error(err);
       }
     };
-    reader.readAsText(file);
+    
+    // Önce Windows-1254 (Türkçe) encoding ile okumayı dene
+    reader.readAsText(file, 'windows-1254');
   };
 
   // --- ÇİZİM İŞLEMLERİ (Faz 2.1) ---
@@ -710,19 +926,67 @@ const App = () => {
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const drawGrid = (ctx, w, h, sc, off) => {
+        // F7 ile grid açma/kapatma kontrolü
+        if (!gridVisible) return;
+        
+        ctx.strokeStyle = '#3a3a3a';
+        ctx.lineWidth = 0.5;
+        
+        let gridSize = 50 * sc;
+        while(gridSize < 20) gridSize *= 2;
+        while(gridSize > 100) gridSize /= 2;
+
+        const startX = off.x % gridSize;
+        const startY = off.y % gridSize;
+        
+        ctx.beginPath();
+        for(let x = startX; x < w; x+= gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        for(let y = startY; y < h; y+= gridSize) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+        ctx.stroke();
+        
+        // Origin Crosshair (0,0 noktası) - Daha büyük ve belirgin
+        const originX = off.x;
+        const originY = off.y;
+        ctx.strokeStyle = '#ef4444'; // Parlak kırmızı eksen
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(originX - 20, originY); ctx.lineTo(originX + 20, originY);
+        ctx.moveTo(originX, originY - 20); ctx.lineTo(originX, originY + 20);
+        ctx.stroke();
+    };
+
     // 2. Grid
     drawGrid(ctx, canvas.width, canvas.height, scale, offset);
 
-    // 3. Render Entities (Önce seçili olmayanları çiz)
+    // 3. Render Entities (Canvas sınırları içinde)
+    // Canvas sınırlarını ayarla
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, canvasWidth, canvasHeight);
+    ctx.clip(); // Canvas dışına çizim yapma
+    
     const renderEntity = (entity, isSelected = false) => {
       if (hiddenLayers.has(entity.layer)) return;
       
       ctx.beginPath();
-      ctx.strokeStyle = isSelected ? '#facc15' : '#e0e0e0'; // Seçili ise sarı
-      ctx.lineWidth = isSelected ? Math.max(2.5 / scale, 2.5) : Math.max(1 / scale, 1);
       
-      // Katmana göre renk ayarı (seçili değilse)
-      if (!isSelected) {
+      // Seçili nesneler için daha belirgin görünüm
+      if (isSelected) {
+        ctx.strokeStyle = '#fbbf24'; // Sarı (parlak)
+        ctx.lineWidth = Math.max(3 / scale, 2);
+        // Shadow efektini kapat
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = Math.max(1 / scale, 1);
+        ctx.shadowBlur = 0;
+        
+        // Katmana göre renk ayarı
         if (entity.layer === 'DUVAR' || entity.layer.includes('WALL')) {
           ctx.strokeStyle = '#fca5a5';
         } else if (entity.type === 'ARC' || entity.type === 'CIRCLE' || entity.type === 'RECTANGLE') {
@@ -765,7 +1029,7 @@ const App = () => {
             ctx.closePath();
         }
       }
-      else if (entity.type === 'RECTANGLE') { // Dikdörtgen Çizimi
+      else if (entity.type === 'RECTANGLE') {
         const screenX1 = toScreenX(entity.x1);
         const screenY1 = toScreenY(entity.y1);
         const screenX2 = toScreenX(entity.x2);
@@ -778,8 +1042,49 @@ const App = () => {
         
         ctx.rect(rectX, rectY, rectW, rectH);
       }
+      else if (entity.type === 'TEXT' || entity.type === 'MTEXT') {
+        // Yazı için stroke yerine fill kullanacağız
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const fontSize = entity.height * scale; // Scale ile orantılı
+        
+        // Çok küçük yazıları çizme (performans için)
+        if (fontSize < 1) {
+          return;
+        }
+        
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        if (entity.rotation) {
+          ctx.rotate(-entity.rotation * Math.PI / 180);
+        }
+        
+        ctx.font = `${fontSize}px Arial, sans-serif`;
+        ctx.fillStyle = isSelected ? '#fbbf24' : '#e0e0e0';
+        ctx.textBaseline = 'bottom';
+        
+        // MTEXT formatlarını temizle (\\P = satır sonu, vb.)
+        let displayText = entity.text || '';
+        displayText = displayText.replace(/\\P/g, '\n').replace(/\\[^;]+;/g, '');
+        
+        // Çok satırlı yazı desteği
+        const lines = displayText.split('\n');
+        lines.forEach((line, idx) => {
+          ctx.fillText(line, 0, -idx * fontSize);
+        });
+        
+        ctx.restore();
+        
+        // TEXT için stroke atla
+        return;
+      }
       
       ctx.stroke();
+      
+      // Shadow'u sıfırla
+      if (isSelected) {
+        ctx.shadowBlur = 0;
+      }
     };
 
     // Tüm nesneleri render et
@@ -795,6 +1100,8 @@ const App = () => {
       }
     });
     
+    ctx.restore(); // Clipping'i kaldır
+    
     // 4. Aktif Çizim Önizlemesi (Polyline/Circle/Rectangle)
     if (currentDrawingState) {
         ctx.strokeStyle = '#10b981';
@@ -807,13 +1114,15 @@ const App = () => {
         const currentScreenY = toScreenY(mouseWorldPos.y);
 
         if (currentDrawingState.type === 'polyline' && currentPolyline.length > 0) {
-            // Polyline
+            // Polyline - sadece en az 1 nokta varsa çiz
+            ctx.strokeStyle = '#10b981'; // Yeşil
             ctx.beginPath();
             ctx.moveTo(toScreenX(currentPolyline[0].x), toScreenY(currentPolyline[0].y));
             
             for(let i = 1; i < currentPolyline.length; i++) {
                 ctx.lineTo(toScreenX(currentPolyline[i].x), toScreenY(currentPolyline[i].y));
             }
+            // Son noktadan mouse pozisyonuna preview çizgisi
             ctx.lineTo(currentScreenX, currentScreenY);
             ctx.stroke();
             
@@ -871,62 +1180,48 @@ const App = () => {
         ctx.stroke();
     }
     
-    // 6. Seçim Kutusu Çizimi (Faz 1.2)
+    // 6. Seçim Kutusu Çizimi (Faz 1.2) - Canvas sınırları içinde
     if (selectionRect) {
         const { x, y, w, h } = selectionRect;
         
-        // Renge ve Dolguya karar ver
+        // Canvas sınırlarını al
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        
+        // Seçim kutusunu canvas içinde sınırla
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, canvasWidth, canvasHeight);
+        ctx.clip(); // Canvas dışına çizim yapma
+        
+        // Renge ve Dolguya karar ver (AutoCAD tarzı)
         if (selectionMode === 'window') {
             // Soldan Sağa: Mavi (Window Selection)
-            ctx.strokeStyle = '#60a5fa'; 
-            ctx.fillStyle = 'rgba(96, 165, 250, 0.1)';
-            ctx.setLineDash([]); // Kesik çizgiyi kapat
+            ctx.strokeStyle = '#3b82f6'; 
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.08)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]); // Solid line
         } else {
             // Sağdan Sola: Yeşil (Crossing Selection)
-            ctx.strokeStyle = '#34d399'; 
-            ctx.fillStyle = 'rgba(52, 211, 153, 0.1)';
-            ctx.setLineDash([4, 4]); // Kesik çizgi yap
+            ctx.strokeStyle = '#10b981'; 
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]); // Kesikli çizgi
         }
 
         ctx.fillRect(x, y, w, h);
         ctx.strokeRect(x, y, w, h);
         
-        ctx.setLineDash([]); // Çizgiyi sıfırla
+        ctx.restore(); // Clip'i kaldır
     }
 
     return () => {
         window.removeEventListener('resize', setCanvasSize);
     };
 
-  }, [entities, scale, offset, hiddenLayers, activeTool, currentPolyline, mouseWorldPos, activeSnap, selectedEntities, selectionRect, selectionMode, currentDrawingState, sidebarOpen]); // sidebarOpen'ı ekledim
+  }, [entities, scale, offset, hiddenLayers, activeTool, currentPolyline, mouseWorldPos, activeSnap, selectedEntities, selectionRect, selectionMode, currentDrawingState, sidebarOpen, gridVisible]);
 
-  // --- YARDIMCI: GRID (Değişmedi) ---
-  const drawGrid = (ctx, w, h, sc, off) => {
-    ctx.strokeStyle = '#2a2a2a';
-    ctx.lineWidth = 0.5;
-    
-    let gridSize = 50 * sc;
-    while(gridSize < 20) gridSize *= 2;
-    while(gridSize > 100) gridSize /= 2;
 
-    const startX = off.x % gridSize;
-    const startY = off.y % gridSize;
-    
-    ctx.beginPath();
-    for(let x = startX; x < w; x+= gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-    for(let y = startY; y < h; y+= gridSize) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-    ctx.stroke();
-    
-    // Origin Crosshair (0,0 noktası)
-    const originX = off.x;
-    const originY = off.y;
-    ctx.strokeStyle = '#d32f2f'; // Kırmızı eksen
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(originX - 10, originY); ctx.lineTo(originX + 10, originY);
-    ctx.moveTo(originX, originY - 10); ctx.lineTo(originX, originY + 10);
-    ctx.stroke();
-  };
 
   // --- MOUSE HANDLERS ---
   const handleWheel = (e) => {
@@ -949,32 +1244,58 @@ const App = () => {
     setOffset({ x: newOffsetX, y: newOffsetY });
   };
 
+  // Mouse/Touch koordinatlarını normalize et
+  const getEventCoordinates = (e) => {
+    let clientX, clientY;
+    
+    if (e.touches && e.touches.length > 0) {
+      // Touch event
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+      // Touch end event
+      clientX = e.changedTouches[0].clientX;
+      clientY = e.changedTouches[0].clientY;
+    } else {
+      // Mouse event
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    return { clientX, clientY };
+  };
+
   const handleMouseDown = (e) => {
+    const { clientX, clientY } = getEventCoordinates(e);
     const rect = canvasRef.current.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
     
     // Dünya koordinatlarını hesapla
     const worldX = toWorldX(screenX);
     const worldY = toWorldY(screenY);
     
     // Sağ tık veya orta tık pan (kaydırma) için
-    if (e.button === 1 || (activeTool === 'select' && e.button !== 0)) {
+    // Touch event'te button olmadığı için kontrol ekle
+    const button = e.button !== undefined ? e.button : 0;
+    const isTouchEvent = e.type.startsWith('touch');
+    
+    if (button === 1 || (activeTool === 'select' && button !== 0 && !isTouchEvent)) {
         setIsDragging(true);
-        setLastMousePos({ x: e.clientX, y: e.clientY });
+        setLastMousePos({ x: clientX, y: clientY });
         setActiveSnap(null);
         return;
     }
     
-    // Sağ tık ile aktif çizimi iptal et
-    if (e.button === 2 && activeTool !== 'select') {
+    // Sağ tık ile aktif çizimi iptal et (touch'ta yok)
+    if (button === 2 && activeTool !== 'select' && !isTouchEvent) {
         e.preventDefault();
         cancelActiveDrawing();
         return;
     }
     
-    // Sol tık (Ana İşlem)
-    if (e.button === 0) {
+    // Sol tık veya Touch (Ana İşlem)
+    if (button === 0 || isTouchEvent) {
         
         // --- ÇİZİM MODLARI ---
         if (['circle', 'rectangle'].includes(activeTool)) {
@@ -1052,24 +1373,41 @@ const App = () => {
         }
     }
   };
-  
 
   const handleMouseMove = (e) => {
+    const { clientX, clientY } = getEventCoordinates(e);
     const rect = canvasRef.current.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
     
     // Mouse pozisyonunu dünya koordinatlarında kaydet (Aktif çizim için gereklidir)
-    const worldX = toWorldX(screenX);
-    const worldY = toWorldY(screenY);
+    let worldX = toWorldX(screenX);
+    let worldY = toWorldY(screenY);
+    
+    // Ortogonal mod aktifse ve çizim yapılıyorsa koordinatları kısıtla
+    if (isOrthoMode && (activeTool === 'polyline' || activeTool === 'line')) {
+      if (currentPolyline.length > 0) {
+        // Son noktaya göre ortogonal kilitle
+        const lastPoint = currentPolyline[currentPolyline.length - 1];
+        const ortho = applyOrthoMode(worldX, worldY, lastPoint.x, lastPoint.y);
+        worldX = ortho.x;
+        worldY = ortho.y;
+      } else if (currentDrawingState && currentDrawingState.startX !== undefined) {
+        // Çizgi başlangıcına göre ortogonal kilitle
+        const ortho = applyOrthoMode(worldX, worldY, currentDrawingState.startX, currentDrawingState.startY);
+        worldX = ortho.x;
+        worldY = ortho.y;
+      }
+    }
+    
     setMouseWorldPos({ x: worldX, y: worldY });
 
     if (isDragging) {
       // Kaydırma (Pan)
-      const dx = e.clientX - lastMousePos.x;
-      const dy = e.clientY - lastMousePos.y;
+      const dx = clientX - lastMousePos.x;
+      const dy = clientY - lastMousePos.y;
       setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-      setLastMousePos({ x: e.clientX, y: e.clientY });
+      setLastMousePos({ x: clientX, y: clientY });
       setActiveSnap(null); 
       setSelectionRect(null); // Kaydırma sırasında seçim kutusunu temizle
       return;
@@ -1105,7 +1443,7 @@ const App = () => {
     }
     
     // --- SNAP KONTROLÜ (Faz 1.1) ---
-    if (['polyline', 'circle', 'rectangle'].includes(activeTool)) {
+    if (['polyline', 'circle', 'rectangle'].includes(activeTool) && snapEnabled) {
       const allSnaps = getAllSnapPoints();
       let closestSnap = null;
       let minDistanceSq = SNAP_TOLERANCE_PX ** 2; // Piksel karesi cinsinden tolerans
@@ -1145,7 +1483,7 @@ const App = () => {
           setSelectionRect(null);
           setSelectionMode(null);
       }
-  }
+  };
 
   // --- Layer Management ---
   const toggleLayer = (layerName) => {
@@ -1155,35 +1493,153 @@ const App = () => {
     setHiddenLayers(newHidden);
   };
 
-  // --- Keyboard Shortcuts (Ctrl+Z / Ctrl+Y) ---
+  // --- Keyboard Shortcuts (AutoCAD Fonksiyon Tuşları) ---
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) { // Ctrl veya Cmd
-        if (e.key === 'z' || e.key === 'Z') {
-          e.preventDefault();
-          handleUndo();
-        } else if (e.key === 'y' || e.key === 'Y') {
-          e.preventDefault();
-          handleRedo();
+      // ALT tuşu - Ortogonal mod (AutoCAD F8 benzeri)
+      if (e.key === 'Alt') {
+        e.preventDefault();
+        setIsOrthoMode(true);
+        return;
+      }
+      
+      // ESC tuşu ile aktif çizimi iptal et
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (activeTool !== 'select' || currentPolyline.length > 0 || currentDrawingState) {
+          cancelActiveDrawing();
         }
+        return;
+      }
+      
+      // AutoCAD Fonksiyon Tuşları
+      switch(e.key) {
+        case 'F2':
+          e.preventDefault();
+          // F2: Komut geçmişi/konsol açma (gelecekte eklenebilir)
+          console.log('F2: Komut geçmişi (özellik gelecekte eklenecek)');
+          break;
+          
+        case 'F3':
+          e.preventDefault();
+          // F3: Snap açma/kapatma
+          setSnapEnabled(prev => !prev);
+          break;
+          
+        case 'F7':
+          e.preventDefault();
+          // F7: Grid açma/kapatma
+          setGridVisible(prev => !prev);
+          break;
+          
+        case 'F8':
+          e.preventDefault();
+          // F8: Ortogonal mod toggle
+          setIsOrthoMode(prev => !prev);
+          break;
+          
+        case 'F9':
+          e.preventDefault();
+          // F9: Snap grid açma/kapatma (şimdilik F3 ile aynı)
+          setSnapEnabled(prev => !prev);
+          break;
+          
+        case 'F10':
+          e.preventDefault();
+          // F10: Polar tracking (gelecekte eklenebilir)
+          console.log('F10: Polar tracking (özellik gelecekte eklenecek)');
+          break;
+          
+        case 'F11':
+          e.preventDefault();
+          // F11: Object snap tracking (gelecekte eklenebilir)
+          console.log('F11: Object snap tracking (özellik gelecekte eklenecek)');
+          break;
+          
+        case 'F12':
+          e.preventDefault();
+          // F12: Dynamic input (gelecekte eklenebilir)
+          console.log('F12: Dynamic input (özellik gelecekte eklenecek)');
+          break;
+      }
+      
+      // Ctrl/Cmd kısayolları
+      if (e.ctrlKey || e.metaKey) {
+        switch(e.key.toLowerCase()) {
+          case 'z':
+            e.preventDefault();
+            handleUndo();
+            break;
+          case 'y':
+            e.preventDefault();
+            handleRedo();
+            break;
+          case 'a':
+            e.preventDefault();
+            // Ctrl+A: Tümünü seç
+            setSelectedEntities(new Set(entities.map(entity => entity.id)));
+            setActiveTool('select');
+            break;
+          case 'd':
+            e.preventDefault();
+            // Ctrl+D: Seçimi kaldır
+            setSelectedEntities(new Set());
+            break;
+        }
+      }
+      
+      // Del tuşu - Seçili nesneleri sil
+      if (e.key === 'Delete' && selectedEntities.size > 0) {
+        e.preventDefault();
+        const remainingEntities = entities.filter(entity => !selectedEntities.has(entity.id));
+        setEntities(remainingEntities);
+        setSelectedEntities(new Set());
+        addToHistory(remainingEntities);
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      // ALT tuşu bırakıldığında ortogonal modu kapat (sadece ALT basılı tutma modu için)
+      // F8 ile açılmışsa kapanmasın
+      if (e.key === 'Alt') {
+        e.preventDefault();
+        // Not: F8 ile toggle edildiğinde ALT bırakınca kapanmamalı
+        // Bu yüzden basit bir state kontrolü gerekebilir, şimdilik ALT basılı tutma modu olarak bırakıyoruz
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+    document.addEventListener('keyup', handleKeyUp);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [handleUndo, handleRedo, activeTool, currentPolyline, currentDrawingState, cancelActiveDrawing, entities, selectedEntities]);
 
 
   const canUndo = historyIndex >= 0;
   const canRedo = historyIndex < history.length - 1;
 
+  // Canvas cursor hesaplama
+  const canvasCursor = useMemo(() => {
+    if (activeTool === 'polyline' || activeTool === 'circle' || activeTool === 'rectangle') {
+      return 'crosshair';
+    }
+    if (isDragging) return 'grabbing';
+    if (isSelectionDragging) return 'default';
+    return 'grab';
+  }, [activeTool, isDragging, isSelectionDragging]);
 
   return (
-    <div className="flex h-screen bg-gray-900 overflow-hidden font-sans text-gray-200" onContextMenu={(e) => e.preventDefault()}>
+    <div 
+      className="flex flex-col md:flex-row h-screen overflow-hidden font-sans text-gray-200" 
+      style={{background: 'linear-gradient(to bottom right, #111827, #111827, #1f2937)'}} 
+      onContextMenu={(e) => e.preventDefault()}
+    >
       
-      {/* TOOLBAR */}
-      <div className="w-16 bg-gray-800 border-r border-gray-700 flex flex-col items-center py-4 z-10">
-        <div className="mb-6 bg-blue-600 p-2 rounded-lg"><span className="font-bold text-white text-xs">DXF</span></div>
+      {/* TOOLBAR - Mobilde üstte yatay, masaüstünde solda dikey */}
+      <div className="w-full md:w-16 bg-gray-800/95 backdrop-blur-sm border-b md:border-b-0 md:border-r border-gray-700/50 flex md:flex-col items-center justify-around md:justify-start px-2 py-2 md:py-4 z-20 overflow-x-auto md:overflow-x-visible shadow-xl">
+        <div className="mb-0 md:mb-6 p-2 rounded-lg shadow-lg transition-all duration-300" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'}}><span className="font-bold text-white text-xs tracking-wider">DXF</span></div>
         
         {/* Undo / Redo Butonları (Faz 1.3) */}
         <ToolButton 
@@ -1198,13 +1654,29 @@ const App = () => {
             onClick={handleRedo} 
             disabled={!canRedo} 
         />
-        <div className="h-px w-8 bg-gray-600 my-2"></div>
+        <div className="hidden md:block h-px w-8 bg-gray-600 my-2"></div>
 
         <ToolButton icon={MousePointer2} title="Seç/Kaydır" active={activeTool === 'select'} onClick={cancelActiveDrawing} />
+        
+        {/* Seçili nesneleri sil (Delete tuşu) */}
+        <ToolButton 
+          icon={Trash2} 
+          title={`Seçili Nesneleri Sil (${selectedEntities.size} seçili)`}
+          onClick={() => {
+            if (selectedEntities.size > 0) {
+              const remainingEntities = entities.filter(entity => !selectedEntities.has(entity.id));
+              setEntities(remainingEntities);
+              setSelectedEntities(new Set());
+              addToHistory(remainingEntities);
+            }
+          }}
+          disabled={selectedEntities.size === 0}
+        />
+        
         <ToolButton icon={Maximize} title="Ekrana Sığdır (Fit to Screen)" onClick={() => fitToScreen()} />
         <ToolButton icon={ZoomIn} title="Yakınlaştır" onClick={() => setScale(s => s * 1.2)} />
         <ToolButton icon={ZoomOut} title="Uzaklaştır" onClick={() => setScale(s => s / 1.2)} />
-        <div className="h-px w-8 bg-gray-600 my-2"></div>
+        <div className="hidden md:block h-px w-8 bg-gray-600 my-2"></div>
         
         {/* Polyline Çizim Aracı (Faz 2.1) */}
         <ToolButton 
@@ -1243,33 +1715,62 @@ const App = () => {
             <button 
                 title="Çizimi Bitir (Çift Tıklama Veya Bu Buton)"
                 onClick={finishPolyline}
-                className="p-2 mt-1 rounded-lg bg-green-600 hover:bg-green-700 text-white animate-pulse"
+                className="p-2 md:mt-1 rounded-lg text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300"
+                style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
             >
-                <PlusCircle size={20} />
+                <PlusCircle size={18} className="md:w-5 md:h-5" />
             </button>
         )}
         
-        <div className="mt-auto">
-             <label className="cursor-pointer p-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white block mb-2" title="DXF Yükle">
-                <Upload size={20} />
-                <input type="file" accept=".dxf" className="hidden" onChange={handleFileUpload} />
+        <div className="md:mt-auto flex flex-col gap-1 md:gap-2">
+             {/* Grid Toggle (F7) */}
+             <ToolButton 
+                icon={Grid3x3} 
+                title="Grid Açma/Kapatma (F7)" 
+                active={gridVisible} 
+                onClick={() => setGridVisible(prev => !prev)} 
+              />
+             
+             {/* Snap Toggle (F3/F9) */}
+             <ToolButton 
+                icon={Magnet} 
+                title="Snap Açma/Kapatma (F3)" 
+                active={snapEnabled} 
+                onClick={() => setSnapEnabled(prev => !prev)} 
+              />
+             
+             {/* DXF/DWG Dosya Yükleme */}
+             <label className="cursor-pointer p-2 md:p-3 rounded-lg text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="CAD Dosyası Yükle (DXF/DWG)">
+                <Upload size={18} className="md:w-5 md:h-5" />
+                <input 
+                  type="file" 
+                  accept=".dxf,.dwg" 
+                  className="hidden" 
+                  onChange={handleFileUpload} 
+                  onClick={(e) => { e.target.value = null; }} 
+                />
              </label>
         </div>
       </div>
 
       {/* CANVAS */}
       <div 
-        className="flex-1 relative bg-[#1a1a1a] overflow-hidden" 
-        style={{ cursor: 
-            activeTool === 'polyline' || activeTool === 'circle' || activeTool === 'rectangle' ? (activeSnap ? 'crosshair' : 'crosshair') : 
-            (isDragging ? 'grabbing' : (isSelectionDragging ? (selectionMode === 'window' ? 'default' : 'default') : 'grab')) 
+        className="flex-1 relative overflow-hidden min-h-0 canvas-container" 
+        style={{
+          background: 'linear-gradient(to bottom right, #030712, #111827, #030712)',
+          cursor: canvasCursor
         }}
       >
-        <div className="absolute top-4 left-4 bg-gray-800/80 px-4 py-2 rounded text-xs text-gray-400 pointer-events-none select-none z-10">
-          Ent: {entities.length + (currentPolyline.length > 0 ? 1 : 0)} | Seçili: {selectedEntities.size} | Zoom: {scale.toExponential(2)} | World X: {mouseWorldPos.x.toFixed(2)} Y: {mouseWorldPos.y.toFixed(2)}
-          {activeSnap && <span className="text-yellow-400 ml-3 font-semibold">| Snap: {activeSnap.type}</span>}
-          {selectionMode && <span className={`ml-3 font-semibold ${selectionMode === 'window' ? 'text-blue-400' : 'text-green-400'}`}>| Mod: {selectionMode === 'window' ? 'Window (Tamamı)' : 'Crossing (Kesişim)'}</span>}
-          {currentDrawingState && <span className="ml-3 font-semibold text-red-400">| Çizim: {currentDrawingState.type.toUpperCase()}</span>}
+        <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-gray-800/90 backdrop-blur-md px-2 py-1 md:px-4 md:py-2 rounded-lg border border-gray-700/50 text-[10px] md:text-xs text-gray-300 pointer-events-none select-none z-10 max-w-[90vw] md:max-w-none overflow-hidden shadow-xl">
+          <div className="hidden md:inline">Ent: {entities.length + (currentPolyline.length > 0 ? 1 : 0)} | Seçili: {selectedEntities.size} | Zoom: {scale.toExponential(2)} | World X: {mouseWorldPos.x.toFixed(2)} Y: {mouseWorldPos.y.toFixed(2)}</div>
+          <div className="md:hidden">E:{entities.length} S:{selectedEntities.size} Z:{scale.toFixed(1)}</div>
+          {!gridVisible && <span className="ml-1 md:ml-3 font-semibold text-gray-500">| GRID:OFF</span>}
+          {!snapEnabled && <span className="ml-1 md:ml-3 font-semibold text-gray-500">| SNAP:OFF</span>}
+          {activeSnap && snapEnabled && <span className="text-yellow-400 ml-1 md:ml-3 font-semibold">| {activeSnap.type}</span>}
+          {isOrthoMode && <span className="ml-1 md:ml-3 font-bold text-cyan-400 animate-pulse">| ORTHO</span>}
+          {selectionMode && <span className={`ml-1 md:ml-3 font-semibold ${selectionMode === 'window' ? 'text-blue-400' : 'text-green-400'}`}>| {selectionMode === 'window' ? 'W' : 'C'}</span>}
+          {currentDrawingState && <span className="ml-1 md:ml-3 font-semibold text-red-400">| {currentDrawingState.type.toUpperCase()}</span>}
+          {(currentPolyline.length > 0 || currentDrawingState) && <span className="ml-1 md:ml-3 text-orange-400 animate-pulse">| ESC: İptal</span>}
         </div>
         
         <canvas
@@ -1280,21 +1781,24 @@ const App = () => {
           onMouseUp={handleMouseUp}
           onMouseLeave={() => { setIsDragging(false); setIsSelectionDragging(false); setSelectionRect(null); setSelectionMode(null); }}
           onDoubleClick={handleDoubleClick}
+          onTouchStart={handleMouseDown}
+          onTouchMove={handleMouseMove}
+          onTouchEnd={handleMouseUp}
           className="w-full h-full block touch-none"
         />
       </div>
 
-      {/* SIDEBAR */}
+      {/* SIDEBAR - Mobilde overlay, masaüstünde normal */}
       {sidebarOpen && (
-        <div className="w-64 bg-gray-800 border-l border-gray-700 flex flex-col z-10 shadow-xl">
-          <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-            <h2 className="font-semibold text-sm text-gray-400">PROJE YÖNETİCİSİ</h2>
-            <button onClick={() => setSidebarOpen(false)}><X size={16} /></button>
+        <div className="fixed md:relative inset-y-0 right-0 w-full md:w-64 bg-gray-800/95 backdrop-blur-md border-l border-gray-700/50 flex flex-col z-30 shadow-2xl transform transition-transform duration-300 animate-fade-in">
+          <div className="p-3 md:p-4 border-b border-gray-700/50 flex justify-between items-center" style={{background: 'linear-gradient(90deg, rgba(51, 65, 85, 0.5) 0%, rgba(55, 65, 81, 0.3) 100%)'}}>
+            <h2 className="font-semibold text-xs md:text-sm" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>PROJE YÖNETİCİSİ</h2>
+            <button onClick={() => setSidebarOpen(false)} className="p-1 hover:bg-gray-700 rounded touch-manipulation"><X size={20} /></button>
           </div>
-          <div className="p-4 overflow-y-auto flex-1">
+          <div className="p-3 md:p-4 overflow-y-auto flex-1">
             {/* GEMINI ÖZELLİKLERİ */}
-            <div className="mb-6 border-b border-gray-700 pb-4">
-                <div className="flex items-center gap-2 mb-3 text-pink-400"><Sparkles size={16} /><h3 className="text-sm font-medium">AI Analiz Araçları</h3></div>
+            <div className="mb-4 md:mb-6 border-b border-gray-700 pb-3 md:pb-4">
+                <div className="flex items-center gap-2 mb-3"><Sparkles size={16} className="text-pink-400 animate-pulse" /><h3 className="text-sm font-medium" style={{background: 'linear-gradient(90deg, #f472b6 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>AI Analiz Araçları</h3></div>
                 <button 
                     onClick={async () => {
                       if (entities.length === 0) {
@@ -1349,7 +1853,8 @@ const App = () => {
                       }
                   }} 
                     disabled={isAnalyzing || entities.length === 0}
-                    className="w-full flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white text-xs py-2 px-4 rounded mb-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center text-white text-xs py-2.5 md:py-2 px-3 md:px-4 rounded-lg mb-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 touch-manipulation shadow-lg"
+                    style={{background: 'linear-gradient(90deg, #9333ea 0%, #ec4899 100%)'}}
                 >
                     {isAnalyzing ? (
                         <RefreshCw className="animate-spin mr-2" size={14} />
@@ -1436,7 +1941,8 @@ const App = () => {
                       }
                   }} 
                     disabled={isSuggesting || layers.size <= 1}
-                    className="w-full flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 px-4 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center text-white text-xs py-2.5 md:py-2 px-3 md:px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 touch-manipulation shadow-lg"
+                    style={{background: 'linear-gradient(90deg, #4f46e5 0%, #3b82f6 100%)'}}
                 >
                     {isSuggesting ? (
                         <RefreshCw className="animate-spin mr-2" size={14} />
@@ -1447,11 +1953,11 @@ const App = () => {
                 </button>
             </div>
             {/* KATMAN YÖNETİMİ */}
-            <div className="mb-6">
-                <div className="flex items-center gap-2 mb-3 text-blue-400"><Layers size={16} /><h3 className="text-sm font-medium">Katmanlar ({layers.size})</h3></div>
+            <div className="mb-4 md:mb-6">
+                <div className="flex items-center gap-2 mb-2 md:mb-3"><Layers size={16} className="text-blue-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Katmanlar ({layers.size})</h3></div>
                 <div className="space-y-1">
                     {Array.from(layers).map(layer => (
-                        <div key={layer} onClick={() => toggleLayer(layer)} className={`flex items-center gap-3 p-2 rounded cursor-pointer text-xs transition-opacity ${hiddenLayers.has(layer) ? 'opacity-50' : 'bg-gray-700/50 hover:bg-gray-700'}`}>
+                        <div key={layer} onClick={() => toggleLayer(layer)} className={`flex items-center gap-2 md:gap-3 p-2 rounded-lg cursor-pointer text-xs transition-all duration-200 touch-manipulation active:scale-95 ${hiddenLayers.has(layer) ? 'opacity-50 grayscale' : 'bg-gray-700/50 hover:bg-gray-600/70 hover:shadow-md hover:translate-x-1'}`}>
                             <div className={`w-3 h-3 rounded-full ${hiddenLayers.has(layer) ? 'bg-gray-500' : 'bg-green-500'}`}></div>
                             <span>{layer}</span>
                         </div>
@@ -1460,17 +1966,17 @@ const App = () => {
             </div>
             
             {/* SEÇİLİ NESNE BİLGİSİ */}
-            <div className="border-t border-gray-700 pt-4 mb-6">
-                <div className="flex items-center gap-2 mb-3 text-yellow-400"><MousePointer2 size={16} /><h3 className="text-sm font-medium">Seçili Nesneler</h3></div>
-                <p className="text-xs text-gray-400">
-                    Toplam {selectedEntities.size} nesne seçili.
-                    {selectedEntities.size > 0 && <button onClick={() => setSelectedEntities(new Set())} className="ml-2 text-red-400 hover:text-red-300 underline">Seçimi Kaldır</button>}
+            <div className="border-t border-gray-700/50 pt-3 md:pt-4 mb-4 md:mb-6">
+                <div className="flex items-center gap-2 mb-2 md:mb-3"><MousePointer2 size={16} className="text-yellow-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #fbbf24 0%, #fb923c 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>Seçili Nesneler</h3></div>
+                <p className="text-xs text-gray-300">
+                    Toplam <span className="font-semibold text-yellow-400">{selectedEntities.size}</span> nesne seçili.
+                    {selectedEntities.size > 0 && <button onClick={() => setSelectedEntities(new Set())} className="ml-2 text-red-400 hover:text-red-300 underline hover:no-underline transition-all">Seçimi Kaldır</button>}
                 </p>
             </div>
 
-            <div className="border-t border-gray-700 pt-4">
-                <div className="flex items-center gap-2 mb-3 text-blue-400"><Save size={16} /><h3 className="text-sm font-medium">İşlemler</h3></div>
-                <button className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 px-4 rounded">JSON Olarak Aktar</button>
+            <div className="border-t border-gray-700/50 pt-3 md:pt-4">
+                <div className="flex items-center gap-2 mb-2 md:mb-3"><Save size={16} className="text-blue-400" /><h3 className="text-xs md:text-sm font-medium" style={{background: 'linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>İşlemler</h3></div>
+                <button className="w-full text-white text-xs py-2.5 md:py-2 px-3 md:px-4 rounded-lg touch-manipulation shadow-lg transition-all duration-300" style={{background: 'linear-gradient(90deg, #2563eb 0%, #06b6d4 100%)'}}>JSON Olarak Aktar</button>
             </div>
           </div>
         </div>
@@ -1479,27 +1985,27 @@ const App = () => {
       {!sidebarOpen && 
         <button 
           onClick={() => setSidebarOpen(true)} 
-          className="absolute top-4 right-4 p-2 bg-gray-800 rounded text-gray-300 hover:bg-gray-700 transition-colors z-20"
+          className="fixed top-2 right-2 md:absolute md:top-4 md:right-4 p-2.5 md:p-2 bg-gray-800/95 backdrop-blur-sm rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-600 transition-all duration-300 z-20 shadow-xl hover:shadow-glow border border-gray-700/50 touch-manipulation"
         >
-          <Menu size={20} />
+          <Menu size={22} />
         </button>
       }
       
       {/* MODAL KOMPONENTİ */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300">
-            <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">{modalTitle}</h3>
-              <button onClick={closeModal} className="text-gray-400 hover:text-white transition-colors">
-                <X size={20} />
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-2 md:p-4 animate-fade-in">
+          <div className="bg-gray-800/95 backdrop-blur-md border border-gray-700/50 rounded-2xl shadow-2xl w-full max-w-full md:max-w-2xl max-h-[90vh] overflow-hidden transform transition-all duration-300 flex flex-col animate-slide-in">
+            <div className="p-3 md:p-4 border-b border-gray-700/50 flex justify-between items-center shrink-0" style={{background: 'linear-gradient(90deg, rgba(51, 65, 85, 0.5) 0%, rgba(55, 65, 81, 0.3) 100%)'}}>
+              <h3 className="text-base md:text-lg font-semibold truncate pr-2" style={{background: 'linear-gradient(90deg, #ffffff 0%, #d1d5db 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'}}>{modalTitle}</h3>
+              <button onClick={closeModal} className="text-gray-400 hover:text-white transition-colors p-1 touch-manipulation shrink-0">
+                <X size={22} />
               </button>
             </div>
-            <div className="p-6 text-gray-300">
+            <div className="p-4 md:p-6 text-gray-300 overflow-y-auto flex-1">
               {modalContent}
             </div>
-            <div className="p-4 border-t border-gray-700 text-right">
-              <button onClick={closeModal} className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
+            <div className="p-3 md:p-4 border-t border-gray-700 text-right shrink-0">
+              <button onClick={closeModal} className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white py-2.5 md:py-2 px-4 md:px-6 rounded-lg transition-colors touch-manipulation text-sm md:text-base">
                 Kapat
               </button>
               {/* Önerilen Katmanları Uygula butonu eklenebilir. */}
