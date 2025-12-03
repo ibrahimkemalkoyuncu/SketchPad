@@ -41,11 +41,70 @@ const API_URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta/models/
 const API_KEY = ""; // Canvas runtime'da otomatik sağlanacak
 const SNAP_TOLERANCE_PX = 10; // Yakalama hassasiyeti (piksel cinsinden)
 
+// AutoCAD Color Index (ACI) - Temel renkler
+const ACI_COLORS = {
+  1: '#FF0000',   // Kırmızı
+  2: '#FFFF00',   // Sarı
+  3: '#00FF00',   // Yeşil
+  4: '#00FFFF',   // Cyan
+  5: '#0000FF',   // Mavi
+  6: '#FF00FF',   // Magenta
+  7: '#FFFFFF',   // Beyaz
+  8: '#808080',   // Gri
+  9: '#C0C0C0',   // Açık Gri
+  10: '#FF0000',  // Kırmızı
+  11: '#FF7F7F',  // Açık Kırmızı
+  12: '#CC0000',  // Koyu Kırmızı
+  20: '#FF3F00',  // Turuncu-Kırmızı
+  30: '#FF7F00',  // Turuncu
+  40: '#FFBF00',  // Altın
+  50: '#FFFF00',  // Sarı
+  60: '#BFFF00',  // Sarı-Yeşil
+  70: '#7FFF00',  // Açık Yeşil
+  80: '#3FFF00',  // Yeşil
+  90: '#00FF00',  // Parlak Yeşil
+  100: '#00FF3F', // Yeşil-Cyan
+  110: '#00FF7F', // Turkuaz
+  120: '#00FFBF', // Açık Turkuaz
+  130: '#00FFFF', // Cyan
+  140: '#00BFFF', // Açık Mavi
+  150: '#007FFF', // Gökyüzü Mavi
+  160: '#003FFF', // Mavi
+  170: '#0000FF', // Parlak Mavi
+  180: '#3F00FF', // Mor-Mavi
+  190: '#7F00FF', // Mor
+  200: '#BF00FF', // Açık Mor
+  210: '#FF00FF', // Magenta
+  220: '#FF00BF', // Pembe-Magenta
+  230: '#FF007F', // Pembe
+  240: '#FF003F', // Kırmızı-Pembe
+  250: '#333333', // Koyu Gri
+  251: '#505050', // Gri
+  252: '#696969', // Orta Gri
+  253: '#828282', // Açık Gri
+  254: '#BEBEBE', // Çok Açık Gri
+  255: '#FFFFFF', // Beyaz
+};
+
+// Entity'den renk al
+const getEntityColor = (entity, defaultColor = '#e0e0e0') => {
+  // True Color varsa öncelikli
+  if (entity.trueColor) {
+    return `rgb(${entity.trueColor.r}, ${entity.trueColor.g}, ${entity.trueColor.b})`;
+  }
+  // ACI renk indeksi varsa
+  if (entity.colorIndex !== undefined && entity.colorIndex > 0) {
+    return ACI_COLORS[entity.colorIndex] || defaultColor;
+  }
+  return defaultColor;
+};
+
 // ============================================
 // ÇEKİRDEK FONKSİYONLAR - DXF PARSER
 // ============================================
 
 const parseDxfSimple = (dxfString) => {
+  console.log('[DEBUG] parseDxfSimple() çağrıldı, dxfString uzunluk:', dxfString?.length);
   const lines = dxfString.split(/\r?\n/);
   const entities = [];
   const blocks = new Map(); // BLOCK tanımları
@@ -158,7 +217,12 @@ const parseDxfSimple = (dxfString) => {
       }
     }
     else if (currentEntity.type === 'HATCH') {
-      // Hatch'i kaydet (basit sınır çizgisi olarak)
+      // Kalan path'i kaydet
+      if (currentEntity.currentPath && currentEntity.currentPath.vertices.length > 0) {
+        currentEntity.boundaryPaths.push(currentEntity.currentPath);
+        delete currentEntity.currentPath;
+      }
+      // Hatch'i kaydet
       if (currentEntity.boundaryPaths && currentEntity.boundaryPaths.length > 0) {
         if (isBlockSection && currentBlock) {
           currentBlock.entities.push(currentEntity);
@@ -168,8 +232,14 @@ const parseDxfSimple = (dxfString) => {
       }
     }
     else if (currentEntity.type === 'DIMENSION') {
-      // Dimension'ı basit çizgi olarak kaydet
-      if (currentEntity.x1 !== undefined && currentEntity.y1 !== undefined) {
+      // Dimension için gerçek ölçüm noktalarını kontrol et (x3,y3 ve x4,y4)
+      // x1,y1 definition point genellikle 0,0 olur - kullanılmıyor
+      const hasP3 = currentEntity.x3 !== undefined && currentEntity.y3 !== undefined &&
+                    !isNaN(currentEntity.x3) && !isNaN(currentEntity.y3);
+      const hasP4 = currentEntity.x4 !== undefined && currentEntity.y4 !== undefined &&
+                    !isNaN(currentEntity.x4) && !isNaN(currentEntity.y4);
+      
+      if (hasP3 && hasP4) {
         if (isBlockSection && currentBlock) {
           currentBlock.entities.push(currentEntity);
         } else {
@@ -179,6 +249,60 @@ const parseDxfSimple = (dxfString) => {
     }
     else if (currentEntity.type === 'LEADER') {
       if (currentEntity.vertices && currentEntity.vertices.length >= 2) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'IMAGE') {
+      // IMAGE için koordinat kontrolü
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          !isNaN(currentEntity.x) && !isNaN(currentEntity.y)) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'VIEWPORT') {
+      // VIEWPORT için koordinat kontrolü
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          !isNaN(currentEntity.x) && !isNaN(currentEntity.y)) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'OLE2FRAME') {
+      // OLE2FRAME için koordinat kontrolü
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          !isNaN(currentEntity.x) && !isNaN(currentEntity.y)) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'RTEXT') {
+      // RTEXT için koordinat kontrolü
+      if (currentEntity.x !== undefined && currentEntity.y !== undefined &&
+          !isNaN(currentEntity.x) && !isNaN(currentEntity.y)) {
+        if (isBlockSection && currentBlock) {
+          currentBlock.entities.push(currentEntity);
+        } else {
+          entities.push(currentEntity);
+        }
+      }
+    }
+    else if (currentEntity.type === 'WIPEOUT') {
+      // WIPEOUT için vertex kontrolü
+      if (currentEntity.vertices && currentEntity.vertices.length >= 3) {
         if (isBlockSection && currentBlock) {
           currentBlock.entities.push(currentEntity);
         } else {
@@ -299,7 +423,7 @@ const parseDxfSimple = (dxfString) => {
         currentEntity = { type: 'ATTDEF', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5, rotation: 0, tag: '' };
       }
       else if (value === 'INSERT') {
-        currentEntity = { type: 'INSERT', layer: '0', id: crypto.randomUUID(), blockName: '', x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+        currentEntity = { type: 'INSERT', layer: '0', id: crypto.randomUUID(), blockName: '', scaleX: 1, scaleY: 1, rotation: 0 };
       }
       else if (value === 'POINT') {
         currentEntity = { type: 'POINT', layer: '0', id: crypto.randomUUID() };
@@ -308,7 +432,7 @@ const parseDxfSimple = (dxfString) => {
         currentEntity = { type: value, layer: '0', id: crypto.randomUUID() };
       }
       else if (value === 'ELLIPSE') {
-        currentEntity = { type: 'ELLIPSE', layer: '0', id: crypto.randomUUID(), x: 0, y: 0, majorX: 1, majorY: 0, ratio: 1, startAngle: 0, endAngle: Math.PI * 2 };
+        currentEntity = { type: 'ELLIPSE', layer: '0', id: crypto.randomUUID(), ratio: 1, startAngle: 0, endAngle: Math.PI * 2 };
       }
       else if (value === 'SPLINE') {
         currentEntity = { type: 'SPLINE', layer: '0', id: crypto.randomUUID(), controlPoints: [], degree: 3 };
@@ -322,6 +446,31 @@ const parseDxfSimple = (dxfString) => {
       else if (value === 'LEADER') {
         currentEntity = { type: 'LEADER', layer: '0', id: crypto.randomUUID(), vertices: [] };
       }
+      else if (value === 'IMAGE') {
+        currentEntity = { type: 'IMAGE', layer: '0', id: crypto.randomUUID(), imagePath: '' };
+      }
+      else if (value === 'WIPEOUT') {
+        currentEntity = { type: 'WIPEOUT', layer: '0', id: crypto.randomUUID(), vertices: [] };
+      }
+      else if (value === 'VIEWPORT') {
+        currentEntity = { type: 'VIEWPORT', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'OLE2FRAME') {
+        currentEntity = { type: 'OLE2FRAME', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'REGION') {
+        currentEntity = { type: 'REGION', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === '3DFACE') {
+        currentEntity = { type: '3DFACE', layer: '0', id: crypto.randomUUID() };
+      }
+      else if (value === 'RTEXT') {
+        currentEntity = { type: 'RTEXT', layer: '0', id: crypto.randomUUID(), text: '', height: 2.5 };
+      }
+      else {
+        // Bilinmeyen entity türlerini de sakla
+        currentEntity = { type: value, layer: '0', id: crypto.randomUUID(), _unknown: true };
+      }
       continue;
     }
     
@@ -330,6 +479,22 @@ const parseDxfSimple = (dxfString) => {
     // Ortak: Layer (kod 8)
     if (code === 8) {
       currentEntity.layer = value;
+      continue;
+    }
+    
+    // Ortak: Renk (kod 62 = ACI renk indeksi, kod 420 = True Color RGB)
+    if (code === 62) {
+      currentEntity.colorIndex = parseInt(value);
+      continue;
+    }
+    if (code === 420) {
+      // True color: 24-bit RGB değeri
+      const rgb = parseInt(value);
+      currentEntity.trueColor = {
+        r: (rgb >> 16) & 0xFF,
+        g: (rgb >> 8) & 0xFF,
+        b: rgb & 0xFF
+      };
       continue;
     }
     
@@ -467,6 +632,37 @@ const parseDxfSimple = (dxfString) => {
         currentVertexX = null;
       }
     }
+    // HATCH
+    else if (currentEntity.type === 'HATCH') {
+      if (code === 2) currentEntity.patternName = value;
+      else if (code === 70) currentEntity.solidFill = parseInt(value) === 1;
+      else if (code === 91) {
+        // Boundary path sayısı - yeni path başlat
+        if (!currentEntity.currentPath) {
+          currentEntity.currentPath = { vertices: [] };
+        }
+      }
+      else if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          if (!currentEntity.currentPath) {
+            currentEntity.currentPath = { vertices: [] };
+          }
+          currentEntity.currentPath.vertices.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
+      else if (code === 97) {
+        // Source boundary objects - path'i kaydet
+        if (currentEntity.currentPath && currentEntity.currentPath.vertices.length > 0) {
+          currentEntity.boundaryPaths.push(currentEntity.currentPath);
+          currentEntity.currentPath = { vertices: [] };
+        }
+      }
+    }
     // DIMENSION
     else if (currentEntity.type === 'DIMENSION') {
       if (code === 10) currentEntity.x1 = parseFloat(value);
@@ -492,6 +688,52 @@ const parseDxfSimple = (dxfString) => {
         }
         currentVertexX = null;
       }
+    }
+    // IMAGE
+    else if (currentEntity.type === 'IMAGE') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 11) currentEntity.uX = parseFloat(value); // U vektörü (genişlik yönü)
+      else if (code === 21) currentEntity.uY = parseFloat(value);
+      else if (code === 12) currentEntity.vX = parseFloat(value); // V vektörü (yükseklik yönü)
+      else if (code === 22) currentEntity.vY = parseFloat(value);
+      else if (code === 13) currentEntity.width = parseFloat(value); // Piksel genişliği
+      else if (code === 23) currentEntity.height = parseFloat(value); // Piksel yüksekliği
+      else if (code === 340) currentEntity.imageDefHandle = value; // IMAGEDEF referansı
+    }
+    // WIPEOUT
+    else if (currentEntity.type === 'WIPEOUT') {
+      if (code === 10) {
+        currentVertexX = parseFloat(value);
+      }
+      else if (code === 20 && currentVertexX !== null) {
+        const y = parseFloat(value);
+        if (!isNaN(currentVertexX) && !isNaN(y)) {
+          currentEntity.vertices.push({ x: currentVertexX, y: y });
+        }
+        currentVertexX = null;
+      }
+    }
+    // VIEWPORT
+    else if (currentEntity.type === 'VIEWPORT') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.width = parseFloat(value);
+      else if (code === 41) currentEntity.height = parseFloat(value);
+    }
+    // OLE2FRAME
+    else if (currentEntity.type === 'OLE2FRAME') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 11) currentEntity.x2 = parseFloat(value);
+      else if (code === 21) currentEntity.y2 = parseFloat(value);
+    }
+    // RTEXT
+    else if (currentEntity.type === 'RTEXT') {
+      if (code === 10) currentEntity.x = parseFloat(value);
+      else if (code === 20) currentEntity.y = parseFloat(value);
+      else if (code === 40) currentEntity.height = parseFloat(value);
+      else if (code === 1) currentEntity.text = value;
     }
   }
   
@@ -523,6 +765,15 @@ const parseDxfSimple = (dxfString) => {
   };
   
   processEntities(entities);
+  
+  // Debug: Bulunan entity türlerini konsola yaz
+  const typeCounts = {};
+  resolvedEntities.forEach(e => {
+    typeCounts[e.type] = (typeCounts[e.type] || 0) + 1;
+  });
+  console.log('DXF Entity türleri:', typeCounts);
+  console.log('Toplam entity sayısı:', resolvedEntities.length);
+  
   return resolvedEntities.length > 0 ? resolvedEntities : entities;
 };
 
@@ -606,9 +857,54 @@ const transformEntity = (ent, offsetX, offsetY, scaleX, scaleY, rotation, baseX 
       const p2 = transformPoint(ent.x2, ent.y2);
       newEnt.x2 = p2.x; newEnt.y2 = p2.y;
     }
+    if (ent.x3 !== undefined) {
+      const p3 = transformPoint(ent.x3, ent.y3);
+      newEnt.x3 = p3.x; newEnt.y3 = p3.y;
+    }
+    if (ent.x4 !== undefined) {
+      const p4 = transformPoint(ent.x4, ent.y4);
+      newEnt.x4 = p4.x; newEnt.y4 = p4.y;
+    }
+  }
+  else if (ent.type === 'HATCH') {
+    if (ent.boundaryPaths) {
+      newEnt.boundaryPaths = ent.boundaryPaths.map(path => {
+        if (path.vertices) {
+          return {
+            ...path,
+            vertices: path.vertices.map(v => transformPoint(v.x, v.y))
+          };
+        }
+        return path;
+      });
+    }
+  }
+  else if (ent.type === 'IMAGE' || ent.type === 'VIEWPORT' || ent.type === 'OLE2FRAME') {
+    if (ent.x !== undefined) {
+      const p = transformPoint(ent.x, ent.y);
+      newEnt.x = p.x; newEnt.y = p.y;
+    }
+    if (ent.x2 !== undefined) {
+      const p2 = transformPoint(ent.x2, ent.y2);
+      newEnt.x2 = p2.x; newEnt.y2 = p2.y;
+    }
+    if (ent.width !== undefined) newEnt.width = ent.width * Math.abs(scaleX);
+    if (ent.height !== undefined) newEnt.height = ent.height * Math.abs(scaleY);
+  }
+  else if (ent.type === 'WIPEOUT') {
+    if (ent.vertices) {
+      newEnt.vertices = ent.vertices.map(v => transformPoint(v.x, v.y));
+    }
+  }
+  else if (ent._unknown) {
+    // Bilinmeyen tip ama sakla
+    if (ent.x !== undefined) {
+      const p = transformPoint(ent.x, ent.y || 0);
+      newEnt.x = p.x; newEnt.y = p.y;
+    }
   }
   else {
-    return null; // Bilinmeyen tip
+    return null; // Transform edilemeyen tip
   }
   
   return newEnt;
@@ -677,10 +973,28 @@ const getEntityBounds = (ent) => {
       }
     }
     else if (ent.type === 'DIMENSION') {
-      if (ent.x1 !== undefined) updateBounds(ent.x1, ent.y1);
+      // x1,y1 (def point) genellikle 0,0 olduğu için bounds'a dahil etme
+      // if (ent.x1 !== undefined) updateBounds(ent.x1, ent.y1);
+      
+      // x2,y2 (text point) önemli
       if (ent.x2 !== undefined) updateBounds(ent.x2, ent.y2);
+      
+      // x3,y3 ve x4,y4 (ölçüm noktaları)
       if (ent.x3 !== undefined) updateBounds(ent.x3, ent.y3);
       if (ent.x4 !== undefined) updateBounds(ent.x4, ent.y4);
+    }
+    else if (ent.type === 'USER_IMAGE' || ent.type === 'IMAGE') {
+      updateBounds(ent.x, ent.y);
+      updateBounds(ent.x + (ent.width || 100), ent.y - (ent.height || 100));
+    }
+    else if (ent.type === 'HATCH') {
+      if (ent.boundaryPaths) {
+        ent.boundaryPaths.forEach(path => {
+          if (path.vertices) {
+            path.vertices.forEach(v => updateBounds(v.x, v.y));
+          }
+        });
+      }
     }
     
     // Geçerli sınırlar bulunamazsa varsayılan döndür
@@ -812,7 +1126,7 @@ const ToolButton = ({ icon: Icon, active, onClick, title, disabled = false }) =>
       boxShadow: '0 0 20px rgba(59, 130, 246, 0.5), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
     } : {}}
     className={`p-3 md:p-3 rounded-xl transition-all duration-300 touch-manipulation relative overflow-hidden group
-      min-w-[44px] min-h-[44px] flex items-center justify-center
+      min-w-11 min-h-11 flex items-center justify-center
       ${active 
         ? 'text-white scale-105' 
         : 'bg-gray-700/80 backdrop-blur-sm text-gray-300 hover:bg-gray-600/90 hover:text-white hover:shadow-md border border-gray-600/30 hover:border-gray-500/50 active:bg-gray-500/90 active:scale-95'
@@ -834,6 +1148,9 @@ const App = () => {
   const [entities, setEntities] = useState([]); 
   const [layers, setLayers] = useState(new Set(['0'])); 
   const [hiddenLayers, setHiddenLayers] = useState(new Set()); 
+  
+  // Yüklenen resimler için cache (id -> Image object)
+  const loadedImagesRef = useRef(new Map());
   
   // Viewport
   const [scale, setScale] = useState(1);
@@ -887,12 +1204,28 @@ const App = () => {
   const [modalContent, setModalContent] = useState('');
 
   // --- KOORDİNAT DÖNÜŞÜMLERİ ---
-  const toScreenX = (worldX) => (worldX * scale) + offset.x;
-  const toScreenY = (worldY) => (-worldY * scale) + offset.y; // Y flip
+  const toScreenX = (worldX) => {
+    const result = (worldX * scale) + offset.x;
+    // console.log('[DEBUG] toScreenX:', worldX, '->', result);
+    return result;
+  };
+  const toScreenY = (worldY) => {
+    const result = (-worldY * scale) + offset.y;
+    // console.log('[DEBUG] toScreenY:', worldY, '->', result);
+    return result;
+  }; // Y flip
 
   // DÜNYA KOORDİNATLARINA DÖNÜŞÜM 
-  const toWorldX = (screenX) => (screenX - offset.x) / scale;
-  const toWorldY = (screenY) => -(screenY - offset.y) / scale;
+  const toWorldX = (screenX) => {
+    const result = (screenX - offset.x) / scale;
+    // console.log('[DEBUG] toWorldX:', screenX, '->', result);
+    return result;
+  };
+  const toWorldY = (screenY) => {
+    const result = -(screenY - offset.y) / scale;
+    // console.log('[DEBUG] toWorldY:', screenY, '->', result);
+    return result;
+  };
   
   // Ortogonal koordinat hesaplama (AutoCAD F8 modu)
   const applyOrthoMode = useCallback((currentX, currentY, baseX, baseY) => {
@@ -916,6 +1249,7 @@ const App = () => {
 
   // --- KOMUT YÖNETİMİ (Faz 1.3) ---
   const executeCommand = useCallback((command) => {
+      console.log('[DEBUG] executeCommand() çağrıldı, komut:', command?.constructor?.name || command);
       // 1. İlerideki (Redo) komutları sil (Yeni komut geldiği için)
       const newHistory = history.slice(0, historyIndex + 1);
       
@@ -934,6 +1268,7 @@ const App = () => {
   }, [history, historyIndex]);
   
   const handleUndo = useCallback(() => {
+      console.log('[DEBUG] handleUndo() çağrıldı, historyIndex:', historyIndex);
       if (historyIndex < 0) return;
       
       const command = history[historyIndex];
@@ -949,6 +1284,7 @@ const App = () => {
   }, [history, historyIndex]);
 
   const handleRedo = useCallback(() => {
+      console.log('[DEBUG] handleRedo() çağrıldı, historyIndex:', historyIndex);
       if (historyIndex >= history.length - 1) return;
       
       const command = history[historyIndex + 1];
@@ -965,6 +1301,7 @@ const App = () => {
 
   // --- SNAP NOKTASI HESAPLAMA (Faz 1.1) ---
   const getAllSnapPoints = useCallback(() => {
+    console.log('[DEBUG] getAllSnapPoints() çağrıldı, entities:', entities.length);
     const points = [];
     
     // Polyline çizimi devam ederken kendi noktalarını da yakalamalı
@@ -1096,6 +1433,7 @@ const App = () => {
 
   // --- EKRANA SIĞDIRMA (FIT TO SCREEN) (Değişmedi) ---
   const fitToScreen = (currentEntities = entities) => {
+    console.log('[DEBUG] fitToScreen() çağrıldı, entity sayısı:', currentEntities.length);
     if (currentEntities.length === 0) return;
 
     const bounds = calculateExtents(currentEntities);
@@ -1126,8 +1464,10 @@ const App = () => {
 
   // --- DOSYA YÜKLEME HANDLER ---
   const handleFileUpload = (event) => {
+    console.log('[DEBUG] handleFileUpload() çağrıldı');
     const file = event.target.files[0];
     if (!file) return;
+    console.log('[DEBUG] Dosya adı:', file.name, 'Boyut:', file.size);
 
     const fileName = file.name.toLowerCase();
     const fileExtension = fileName.split('.').pop();
@@ -1195,10 +1535,17 @@ const App = () => {
         
         // Debug: Entity tiplerini say
         const typeCounts = {};
+        const unknownTypes = [];
         parsedEntities.forEach(ent => {
           typeCounts[ent.type] = (typeCounts[ent.type] || 0) + 1;
+          if (ent._unknown && !unknownTypes.includes(ent.type)) {
+            unknownTypes.push(ent.type);
+          }
         });
         console.log('Entity tipleri:', typeCounts);
+        if (unknownTypes.length > 0) {
+          console.warn('Bilinmeyen entity türleri:', unknownTypes);
+        }
         
         // Debug: İlk 5 LINE entity'sini göster
         const lineEntities = parsedEntities.filter(e => e.type === 'LINE').slice(0, 5);
@@ -1251,10 +1598,76 @@ const App = () => {
     reader.readAsText(file, 'windows-1254');
   };
 
+  // --- RESİM YÜKLEME HANDLER ---
+  const handleImageUpload = (event) => {
+    console.log('[DEBUG] handleImageUpload() çağrıldı');
+    const file = event.target.files[0];
+    if (!file) return;
+    console.log('[DEBUG] Resim dosyası:', file.name, 'Tip:', file.type);
+
+    const validTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!validTypes.includes(file.type)) {
+      setModalTitle("Desteklenmeyen Resim Formatı");
+      setModalContent("Lütfen PNG, JPEG, GIF, WebP veya SVG formatında bir resim yükleyin.");
+      setShowModal(true);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageDataUrl = e.target.result;
+      
+      // Resmi yükle ve boyutlarını al
+      const img = new Image();
+      img.onload = () => {
+        // Ekranın ortasına yerleştir
+        const canvas = canvasRef.current;
+        const centerX = (canvas.width / 2 - offset.x) / scale;
+        const centerY = (canvas.height / 2 - offset.y) / scale;
+        
+        // Resim boyutlarını ölçekle (max 500 birim)
+        const maxSize = 500;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height);
+          width *= ratio;
+          height *= ratio;
+        }
+        
+        const newImageEntity = {
+          type: 'USER_IMAGE',
+          layer: '0',
+          id: crypto.randomUUID(),
+          x: centerX - width / 2,
+          y: centerY + height / 2, // DXF koordinat sistemi (Y yukarı)
+          width: width,
+          height: height,
+          imageDataUrl: imageDataUrl, // Base64 resim verisi
+          fileName: file.name
+        };
+
+        // Resmi cache'e ekle
+        loadedImagesRef.current.set(newImageEntity.id, img);
+
+        const newEntities = [...entities, newImageEntity];
+        setEntities(newEntities);
+        addToHistory(newEntities);
+        
+        setModalTitle("Resim Eklendi");
+        setModalContent(`"${file.name}" başarıyla eklendi. Resmi seçip taşıyabilirsiniz.`);
+        setShowModal(true);
+      };
+      img.src = imageDataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
   // --- ÇİZİM İŞLEMLERİ (Faz 2.1) ---
   
   // Polyline çizimini bitir
   const finishPolyline = () => {
+    console.log('[DEBUG] finishPolyline() çağrıldı, nokta sayısı:', currentPolyline.length);
     if (currentPolyline.length < 2) {
       setCurrentPolyline([]);
       setActiveTool('select');
@@ -1280,6 +1693,7 @@ const App = () => {
   
   // Aktif çizimi (circle, rectangle, polyline) iptal et
   const cancelActiveDrawing = useCallback(() => {
+    console.log('[DEBUG] cancelActiveDrawing() çağrıldı');
     setCurrentDrawingState(null);
     setCurrentPolyline([]);
     setActiveTool('select');
@@ -1288,6 +1702,7 @@ const App = () => {
   
   // Tek tıklama ile çizim başlangıcını ayarla
   const startDrawing = (type, worldX, worldY) => {
+    console.log('[DEBUG] startDrawing() çağrıldı, tip:', type, 'worldX:', worldX, 'worldY:', worldY);
     // Snap varsa snap noktasını kullan
     const startX = activeSnap ? activeSnap.x : worldX;
     const startY = activeSnap ? activeSnap.y : worldY;
@@ -1306,6 +1721,7 @@ const App = () => {
   
   // Çift tıklama ile çizimi sonlandır
   const handleDoubleClick = (e) => {
+    console.log('[DEBUG] handleDoubleClick() çağrıldı, activeTool:', activeTool);
     if (activeTool === 'polyline' && currentPolyline.length >= 2) {
       finishPolyline();
     } else if (activeTool === 'polyline') {
@@ -1316,6 +1732,7 @@ const App = () => {
 
   // --- SEÇİM HESAPLAMA (Faz 1.2) ---
   const calculateSelection = useCallback((finalRect, mode) => {
+    console.log('[DEBUG] calculateSelection() çağrıldı, mode:', mode, 'rect:', finalRect);
     const canvas = canvasRef.current;
     if (!canvas || !finalRect) return;
 
@@ -1416,7 +1833,13 @@ const App = () => {
     const renderEntity = (entity, isSelected = false) => {
       if (hiddenLayers.has(entity.layer)) return;
       
+      // DEBUG: Entity render başlangıcı
+      console.log(`[renderEntity] type=${entity.type}, id=${entity.id?.substring(0,8) || 'N/A'}`, entity);
+      
       ctx.beginPath();
+      
+      // Entity'nin kendi rengini al
+      const entityColor = getEntityColor(entity, '#e0e0e0');
       
       // Seçili nesneler için daha belirgin görünüm
       if (isSelected) {
@@ -1426,24 +1849,57 @@ const App = () => {
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
       } else {
-        ctx.strokeStyle = '#e0e0e0';
+        // DXF'den gelen rengi kullan, yoksa varsayılan
+        ctx.strokeStyle = entityColor;
         ctx.lineWidth = Math.max(1 / scale, 1);
         ctx.shadowBlur = 0;
         
-        // Katmana göre renk ayarı
-        if (entity.layer === 'DUVAR' || entity.layer.includes('WALL')) {
-          ctx.strokeStyle = '#fca5a5';
-        } else if (entity.type === 'ARC' || entity.type === 'CIRCLE' || entity.type === 'RECTANGLE') {
-          ctx.strokeStyle = '#60a5fa';
+        // Katmana göre renk ayarı (sadece DXF rengi yoksa)
+        if (!entity.trueColor && !entity.colorIndex) {
+          if (entity.layer === 'DUVAR' || entity.layer.includes('WALL')) {
+            ctx.strokeStyle = '#fca5a5';
+          } else if (entity.type === 'ARC' || entity.type === 'CIRCLE' || entity.type === 'RECTANGLE') {
+            ctx.strokeStyle = '#60a5fa';
+          }
         }
       }
       
       // Çizim geometrisi
       if (entity.type === 'LINE') {
+        // Geçerli koordinat kontrolü
+        const valid = entity.x1 !== undefined && entity.y1 !== undefined &&
+                      entity.x2 !== undefined && entity.y2 !== undefined &&
+                      !isNaN(entity.x1) && !isNaN(entity.y1) &&
+                      !isNaN(entity.x2) && !isNaN(entity.y2) &&
+                      isFinite(entity.x1) && isFinite(entity.y1) &&
+                      isFinite(entity.x2) && isFinite(entity.y2);
+        if (!valid) {
+          // console.warn('[renderEntity] LINE invalid coords:', entity);
+          return; // Geçersiz ise çizme ve return et
+        }
+        
+        // 0,0 başlangıç kontrolü - şüpheli çizgileri FİLTRELE
+        // Eğer bir uç 0,0 ise ve diğer uç 0,0'dan uzaksa (>100 birim), bu muhtemelen hatalı bir çizgidir.
+        const isZero1 = Math.abs(entity.x1) < 0.001 && Math.abs(entity.y1) < 0.001;
+        const isZero2 = Math.abs(entity.x2) < 0.001 && Math.abs(entity.y2) < 0.001;
+        
+        if (isZero1 || isZero2) {
+           const dist = Math.sqrt(Math.pow(entity.x2 - entity.x1, 2) + Math.pow(entity.y2 - entity.y1, 2));
+           if (dist > 100) {
+             console.warn('[renderEntity] LINE from/to 0,0 filtered (suspicious):', entity);
+             return; // Çizme
+           }
+        }
+        
         ctx.moveTo(toScreenX(entity.x1), toScreenY(entity.y1));
         ctx.lineTo(toScreenX(entity.x2), toScreenY(entity.y2));
       } 
       else if (entity.type === 'CIRCLE') {
+        const valid = entity.x !== undefined && entity.y !== undefined && 
+                      entity.r !== undefined &&
+                      !isNaN(entity.x) && !isNaN(entity.y) && !isNaN(entity.r) &&
+                      isFinite(entity.x) && isFinite(entity.y) && isFinite(entity.r);
+        if (!valid) return;
         ctx.arc(
             toScreenX(entity.x), 
             toScreenY(entity.y), 
@@ -1452,6 +1908,11 @@ const App = () => {
         );
       }
       else if (entity.type === 'ARC') {
+        const valid = entity.x !== undefined && entity.y !== undefined && 
+                      entity.r !== undefined &&
+                      !isNaN(entity.x) && !isNaN(entity.y) && !isNaN(entity.r) &&
+                      isFinite(entity.x) && isFinite(entity.y) && isFinite(entity.r);
+        if (!valid) return;
         const startRad = -(entity.startAngle * Math.PI / 180);
         const endRad = -(entity.endAngle * Math.PI / 180);
         
@@ -1465,17 +1926,47 @@ const App = () => {
         );
       }
       else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-        if (entity.vertices && entity.vertices.length > 0) {
-          ctx.moveTo(toScreenX(entity.vertices[0].x), toScreenY(entity.vertices[0].y));
-          for (let i = 1; i < entity.vertices.length; i++) {
-              ctx.lineTo(toScreenX(entity.vertices[i].x), toScreenY(entity.vertices[i].y));
-          }
-          if (entity.closed) {
-              ctx.closePath();
-          }
+        if (!entity.vertices || entity.vertices.length === 0) return;
+        // Geçerli vertices filtrele
+        const validVerts = entity.vertices.filter(v => 
+          v.x !== undefined && v.y !== undefined &&
+          !isNaN(v.x) && !isNaN(v.y) &&
+          isFinite(v.x) && isFinite(v.y)
+        );
+        if (validVerts.length === 0) return;
+        
+        // 0,0 olan vertexleri filtrele (eğer diğer noktalar uzaksa)
+        // Sadece başlangıç değil, ARADAKİ 0,0 noktaları da sorun yaratabilir.
+        const hasFarPoint = validVerts.some(v => Math.sqrt(v.x*v.x + v.y*v.y) > 100);
+        
+        let renderVerts = validVerts;
+        if (hasFarPoint) {
+            // Eğer çizim genel olarak 0,0'dan uzaksa, 0,0 olan vertexleri çıkar
+            renderVerts = validVerts.filter(v => !(Math.abs(v.x) < 0.001 && Math.abs(v.y) < 0.001));
+            
+            if (renderVerts.length < validVerts.length) {
+                console.warn('[renderEntity] POLYLINE 0,0 vertices filtered:', entity);
+            }
+        }
+        
+        if (renderVerts.length < 2) return;
+
+        ctx.moveTo(toScreenX(renderVerts[0].x), toScreenY(renderVerts[0].y));
+        for (let i = 1; i < renderVerts.length; i++) {
+            ctx.lineTo(toScreenX(renderVerts[i].x), toScreenY(renderVerts[i].y));
+        }
+        if (entity.closed) {
+            ctx.closePath();
         }
       }
       else if (entity.type === 'RECTANGLE') {
+        const valid = entity.x1 !== undefined && entity.y1 !== undefined &&
+                      entity.x2 !== undefined && entity.y2 !== undefined &&
+                      !isNaN(entity.x1) && !isNaN(entity.y1) &&
+                      !isNaN(entity.x2) && !isNaN(entity.y2) &&
+                      isFinite(entity.x1) && isFinite(entity.y1) &&
+                      isFinite(entity.x2) && isFinite(entity.y2);
+        if (!valid) return;
         const screenX1 = toScreenX(entity.x1);
         const screenY1 = toScreenY(entity.y1);
         const screenX2 = toScreenX(entity.x2);
@@ -1490,6 +1981,11 @@ const App = () => {
       }
       else if (entity.type === 'TEXT' || entity.type === 'MTEXT' || entity.type === 'ATTRIB' || entity.type === 'ATTDEF') {
         // Yazı için stroke yerine fill kullanacağız
+        const valid = entity.x !== undefined && entity.y !== undefined &&
+                      !isNaN(entity.x) && !isNaN(entity.y) &&
+                      isFinite(entity.x) && isFinite(entity.y);
+        if (!valid) return;
+        
         const screenX = toScreenX(entity.x);
         const screenY = toScreenY(entity.y);
         const fontSize = entity.height * scale; // Scale ile orantılı
@@ -1506,7 +2002,9 @@ const App = () => {
         }
         
         ctx.font = `${fontSize}px Arial, sans-serif`;
-        ctx.fillStyle = isSelected ? '#fbbf24' : '#e0e0e0';
+        // DXF'den gelen rengi kullan
+        const textColor = getEntityColor(entity, '#e0e0e0');
+        ctx.fillStyle = isSelected ? '#fbbf24' : textColor;
         ctx.textBaseline = 'bottom';
         
         // MTEXT formatlarını temizle (\\P = satır sonu, vb.)
@@ -1526,6 +2024,10 @@ const App = () => {
       }
       else if (entity.type === 'POINT') {
         // Nokta - küçük çarpı işareti olarak çiz
+        const valid = entity.x !== undefined && entity.y !== undefined &&
+                      !isNaN(entity.x) && !isNaN(entity.y) &&
+                      isFinite(entity.x) && isFinite(entity.y);
+        if (!valid) return;
         const screenX = toScreenX(entity.x);
         const screenY = toScreenY(entity.y);
         const pointSize = Math.max(3, 5 / scale);
@@ -1536,21 +2038,64 @@ const App = () => {
         ctx.lineTo(screenX - pointSize, screenY + pointSize);
       }
       else if (entity.type === 'SOLID' || entity.type === 'TRACE') {
-        // Solid/Trace - dolu dörtgen
+        // Solid/Trace - dolu dörtgen (DXF rengi ile)
+        // Geçerli koordinatları kontrol et
+        const hasP1 = entity.x1 !== undefined && entity.y1 !== undefined && 
+                      !isNaN(entity.x1) && !isNaN(entity.y1) &&
+                      isFinite(entity.x1) && isFinite(entity.y1);
+        const hasP2 = entity.x2 !== undefined && entity.y2 !== undefined && 
+                      !isNaN(entity.x2) && !isNaN(entity.y2) &&
+                      isFinite(entity.x2) && isFinite(entity.y2);
+        const hasP3 = entity.x3 !== undefined && entity.y3 !== undefined && 
+                      !isNaN(entity.x3) && !isNaN(entity.y3) &&
+                      isFinite(entity.x3) && isFinite(entity.y3);
+        const hasP4 = entity.x4 !== undefined && entity.y4 !== undefined && 
+                      !isNaN(entity.x4) && !isNaN(entity.y4) &&
+                      isFinite(entity.x4) && isFinite(entity.y4);
+        
+        if (!hasP1 || !hasP2) return; // En az 2 nokta gerekli
+        
+        // DXF SOLID vertex sırası: P1 -> P2 -> P4 -> P3 (bowtie/kelebek önleme)
+        ctx.beginPath();
         ctx.moveTo(toScreenX(entity.x1), toScreenY(entity.y1));
         ctx.lineTo(toScreenX(entity.x2), toScreenY(entity.y2));
-        if (entity.x3 !== undefined) {
+        
+        if (hasP4 && hasP3) {
+          // 4 noktalı dörtgen: 1 → 2 → 4 → 3
+          ctx.lineTo(toScreenX(entity.x4), toScreenY(entity.y4));
           ctx.lineTo(toScreenX(entity.x3), toScreenY(entity.y3));
-        }
-        if (entity.x4 !== undefined) {
+        } else if (hasP3) {
+          // 3 noktalı üçgen
+          ctx.lineTo(toScreenX(entity.x3), toScreenY(entity.y3));
+        } else if (hasP4) {
+          // Sadece P4 varsa
           ctx.lineTo(toScreenX(entity.x4), toScreenY(entity.y4));
         }
+        
         ctx.closePath();
-        ctx.fillStyle = isSelected ? '#fbbf2480' : '#60a5fa40';
+        
+        // DXF'den gelen rengi kullan
+        const solidColor = getEntityColor(entity, '#60a5fa');
+        if (isSelected) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.strokeStyle = '#fbbf24';
+        } else {
+          ctx.fillStyle = solidColor;
+          ctx.strokeStyle = solidColor;
+        }
         ctx.fill();
+        ctx.stroke();
+        return; // stroke() tekrar çağrılmasın
       }
       else if (entity.type === 'ELLIPSE') {
-        // Elips
+        // Elips - koordinat kontrolü
+        const valid = entity.x !== undefined && entity.y !== undefined &&
+                      entity.majorX !== undefined && entity.majorY !== undefined &&
+                      !isNaN(entity.x) && !isNaN(entity.y) &&
+                      !isNaN(entity.majorX) && !isNaN(entity.majorY) &&
+                      isFinite(entity.x) && isFinite(entity.y) &&
+                      isFinite(entity.majorX) && isFinite(entity.majorY);
+        if (!valid) return;
         const screenX = toScreenX(entity.x);
         const screenY = toScreenY(entity.y);
         const majorLength = Math.sqrt(entity.majorX * entity.majorX + entity.majorY * entity.majorY) * scale;
@@ -1562,80 +2107,418 @@ const App = () => {
         ctx.rotate(-rotation);
         ctx.beginPath();
         ctx.ellipse(0, 0, majorLength, minorLength, 0, entity.startAngle || 0, entity.endAngle || Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
+        return;
       }
       else if (entity.type === 'SPLINE') {
         // Spline - kontrol noktalarından geçen eğri (basitleştirilmiş)
-        if (entity.controlPoints && entity.controlPoints.length >= 2) {
-          ctx.moveTo(toScreenX(entity.controlPoints[0].x), toScreenY(entity.controlPoints[0].y));
-          
-          if (entity.controlPoints.length === 2) {
-            ctx.lineTo(toScreenX(entity.controlPoints[1].x), toScreenY(entity.controlPoints[1].y));
-          } else if (entity.controlPoints.length === 3) {
-            ctx.quadraticCurveTo(
-              toScreenX(entity.controlPoints[1].x), toScreenY(entity.controlPoints[1].y),
-              toScreenX(entity.controlPoints[2].x), toScreenY(entity.controlPoints[2].y)
+        if (!entity.controlPoints || entity.controlPoints.length < 2) return;
+        // Geçerli control points filtrele
+        const validCPs = entity.controlPoints.filter(p => 
+          p.x !== undefined && p.y !== undefined &&
+          !isNaN(p.x) && !isNaN(p.y) &&
+          isFinite(p.x) && isFinite(p.y)
+        );
+        
+        if (validCPs.length < 2) return;
+        
+        // 0,0 kontrolü - eğer ilk kontrol noktası 0,0 ise ve diğerleri uzaksa çizme
+        const firstCP = validCPs[0];
+        if (Math.abs(firstCP.x) < 0.001 && Math.abs(firstCP.y) < 0.001) {
+           const hasFarPoint = validCPs.some(p => Math.sqrt(p.x*p.x + p.y*p.y) > 100);
+           if (hasFarPoint) {
+             console.warn('[renderEntity] SPLINE starts at 0,0 filtered:', entity);
+             return;
+           }
+        }
+
+        ctx.moveTo(toScreenX(validCPs[0].x), toScreenY(validCPs[0].y));
+        
+        if (validCPs.length === 2) {
+          ctx.lineTo(toScreenX(validCPs[1].x), toScreenY(validCPs[1].y));
+        } else if (validCPs.length === 3) {
+          ctx.quadraticCurveTo(
+            toScreenX(validCPs[1].x), toScreenY(validCPs[1].y),
+            toScreenX(validCPs[2].x), toScreenY(validCPs[2].y)
+          );
+        } else {
+          // Bezier eğrisi ile yaklaşık çiz
+          for (let i = 1; i < validCPs.length - 2; i += 3) {
+            const p1 = validCPs[i];
+            const p2 = validCPs[i + 1];
+            const p3 = validCPs[Math.min(i + 2, validCPs.length - 1)];
+            ctx.bezierCurveTo(
+              toScreenX(p1.x), toScreenY(p1.y),
+              toScreenX(p2.x), toScreenY(p2.y),
+              toScreenX(p3.x), toScreenY(p3.y)
             );
-          } else {
-            // Bezier eğrisi ile yaklaşık çiz
-            for (let i = 1; i < entity.controlPoints.length - 2; i += 3) {
-              const p1 = entity.controlPoints[i];
-              const p2 = entity.controlPoints[i + 1];
-              const p3 = entity.controlPoints[Math.min(i + 2, entity.controlPoints.length - 1)];
-              ctx.bezierCurveTo(
-                toScreenX(p1.x), toScreenY(p1.y),
-                toScreenX(p2.x), toScreenY(p2.y),
-                toScreenX(p3.x), toScreenY(p3.y)
-              );
-            }
           }
         }
+        ctx.stroke();
+        return;
+      }
+      else if (entity.type === 'HATCH') {
+        // HATCH - dolu alan
+        if (!entity.boundaryPaths || entity.boundaryPaths.length === 0) return;
+        const hatchColor = getEntityColor(entity, '#60a5fa');
+        
+        ctx.save();
+        entity.boundaryPaths.forEach(path => {
+          if (path.vertices && path.vertices.length >= 3) {
+            // Geçerli vertices filtrele
+            const validVerts = path.vertices.filter(v => 
+              v.x !== undefined && v.y !== undefined && 
+              !isNaN(v.x) && !isNaN(v.y) &&
+              isFinite(v.x) && isFinite(v.y)
+            );
+            
+            // 0,0 olan vertexleri filtrele (HATCH için de geçerli)
+            const hasFarPoint = validVerts.some(v => Math.sqrt(v.x*v.x + v.y*v.y) > 100);
+            let renderVerts = validVerts;
+            
+            if (hasFarPoint) {
+                renderVerts = validVerts.filter(v => !(Math.abs(v.x) < 0.001 && Math.abs(v.y) < 0.001));
+            }
+            
+            if (renderVerts.length >= 3) {
+              ctx.beginPath();
+              ctx.moveTo(toScreenX(renderVerts[0].x), toScreenY(renderVerts[0].y));
+              for (let i = 1; i < renderVerts.length; i++) {
+                ctx.lineTo(toScreenX(renderVerts[i].x), toScreenY(renderVerts[i].y));
+              }
+              ctx.closePath();
+              
+              if (isSelected) {
+                ctx.fillStyle = '#fbbf2480';
+                ctx.strokeStyle = '#fbbf24';
+              } else {
+                // Solid fill veya pattern
+                if (entity.solidFill || entity.patternName === 'SOLID') {
+                  ctx.fillStyle = hatchColor;
+                } else {
+                  ctx.fillStyle = hatchColor + '60'; // Semi-transparent
+                }
+                ctx.strokeStyle = hatchColor;
+              }
+              ctx.fill();
+              ctx.lineWidth = Math.max(1 / scale, 0.5);
+              ctx.stroke();
+            }
+          }
+        });
+        ctx.restore();
+        return; // Ana stroke'u atla
       }
       else if (entity.type === 'LEADER') {
         // Leader - ok işaretli çizgi
-        if (entity.vertices && entity.vertices.length >= 2) {
-          ctx.moveTo(toScreenX(entity.vertices[0].x), toScreenY(entity.vertices[0].y));
-          for (let i = 1; i < entity.vertices.length; i++) {
-            ctx.lineTo(toScreenX(entity.vertices[i].x), toScreenY(entity.vertices[i].y));
-          }
-          
-          // Ok ucu çiz
-          if (entity.vertices.length >= 2) {
-            const lastIdx = entity.vertices.length - 1;
-            const endX = toScreenX(entity.vertices[0].x);
-            const endY = toScreenY(entity.vertices[0].y);
-            const prevX = toScreenX(entity.vertices[1].x);
-            const prevY = toScreenY(entity.vertices[1].y);
-            
-            const angle = Math.atan2(endY - prevY, endX - prevX);
-            const arrowSize = 8;
-            
-            ctx.moveTo(endX, endY);
-            ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
-            ctx.moveTo(endX, endY);
-            ctx.lineTo(endX - arrowSize * Math.cos(angle + Math.PI / 6), endY - arrowSize * Math.sin(angle + Math.PI / 6));
-          }
+        if (!entity.vertices || entity.vertices.length < 2) return;
+        // Tüm vertices için NaN kontrolü
+        const validVertices = entity.vertices.filter(v => 
+          v.x !== undefined && v.y !== undefined && 
+          !isNaN(v.x) && !isNaN(v.y) &&
+          isFinite(v.x) && isFinite(v.y)
+        );
+        
+        if (validVertices.length < 2) return;
+        
+        // 0,0 kontrolü - eğer ilk nokta 0,0 ise ve diğerleri uzaksa çizme
+        const firstV = validVertices[0];
+        if (Math.abs(firstV.x) < 0.001 && Math.abs(firstV.y) < 0.001) {
+           // Diğer noktalara bak
+           const hasFarPoint = validVertices.some(v => Math.sqrt(v.x*v.x + v.y*v.y) > 100);
+           if (hasFarPoint) {
+             console.warn('[renderEntity] LEADER starts at 0,0 filtered:', entity);
+             return;
+           }
         }
+
+        ctx.moveTo(toScreenX(validVertices[0].x), toScreenY(validVertices[0].y));
+        for (let i = 1; i < validVertices.length; i++) {
+          ctx.lineTo(toScreenX(validVertices[i].x), toScreenY(validVertices[i].y));
+        }
+        
+        // Ok ucu çiz
+        const endX = toScreenX(validVertices[0].x);
+        const endY = toScreenY(validVertices[0].y);
+        const prevX = toScreenX(validVertices[1].x);
+        const prevY = toScreenY(validVertices[1].y);
+        
+        const angle = Math.atan2(endY - prevY, endX - prevX);
+        const arrowSize = 8;
+        
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowSize * Math.cos(angle + Math.PI / 6), endY - arrowSize * Math.sin(angle + Math.PI / 6));
+        ctx.stroke();
+        return;
       }
       else if (entity.type === 'DIMENSION') {
-        // Dimension - basit çizgi olarak göster
-        if (entity.x1 !== undefined && entity.x2 !== undefined) {
-          ctx.moveTo(toScreenX(entity.x1), toScreenY(entity.y1));
-          ctx.lineTo(toScreenX(entity.x2), toScreenY(entity.y2));
-        }
-        if (entity.x3 !== undefined && entity.x4 !== undefined) {
+        // DIMENSION - Karmaşık yapı, şimdilik sadece ölçü noktalarını çiz
+        // DXF'de kod 10,20 = definition point (genellikle 0,0 olur - kullanmıyoruz)
+        // Kod 13,23 = birinci ölçü noktası, Kod 14,24 = ikinci ölçü noktası
+        
+        const hasP3 = entity.x3 !== undefined && entity.y3 !== undefined && 
+                      !isNaN(entity.x3) && !isNaN(entity.y3) &&
+                      isFinite(entity.x3) && isFinite(entity.y3);
+        const hasP4 = entity.x4 !== undefined && entity.y4 !== undefined && 
+                      !isNaN(entity.x4) && !isNaN(entity.y4) &&
+                      isFinite(entity.x4) && isFinite(entity.y4);
+        
+        // Sadece gerçek ölçü noktaları varsa çiz (P1/P2 definition point olduğu için kullanma)
+        if (hasP3 && hasP4) {
+          // 0,0 kontrolü - eğer ölçüm noktalarından biri 0,0 ise ve diğeri uzaksa çizme
+          const isZero3 = Math.abs(entity.x3) < 0.001 && Math.abs(entity.y3) < 0.001;
+          const isZero4 = Math.abs(entity.x4) < 0.001 && Math.abs(entity.y4) < 0.001;
+          
+          if (isZero3 || isZero4) {
+             const dist = Math.sqrt(Math.pow(entity.x4 - entity.x3, 2) + Math.pow(entity.y4 - entity.y3, 2));
+             if (dist > 100) {
+               console.warn('[renderEntity] DIMENSION point at 0,0 filtered:', entity);
+               return;
+             }
+          }
+
           ctx.moveTo(toScreenX(entity.x3), toScreenY(entity.y3));
           ctx.lineTo(toScreenX(entity.x4), toScreenY(entity.y4));
+        } else {
+          // Geçerli ölçü noktası yoksa çizme
+          return;
         }
+        
         // Dimension text
-        if (entity.text) {
-          const midX = entity.x2 !== undefined ? (entity.x1 + entity.x2) / 2 : entity.x1;
-          const midY = entity.y2 !== undefined ? (entity.y1 + entity.y2) / 2 : entity.y1;
+        if (entity.text && hasP3 && hasP4) {
+          let textX, textY;
+          
+          // Eğer x2,y2 (text position) varsa onu kullan, yoksa orta noktayı hesapla
+          if (entity.x2 !== undefined && entity.y2 !== undefined && 
+              !isNaN(entity.x2) && !isNaN(entity.y2)) {
+            textX = entity.x2;
+            textY = entity.y2;
+          } else {
+            textX = (entity.x3 + entity.x4) / 2;
+            textY = (entity.y3 + entity.y4) / 2;
+          }
+          
           const fontSize = Math.max(10, 2.5 * scale);
           ctx.font = `${fontSize}px Arial`;
           ctx.fillStyle = isSelected ? '#fbbf24' : '#e0e0e0';
-          ctx.fillText(entity.text, toScreenX(midX), toScreenY(midY));
+          ctx.fillText(entity.text, toScreenX(textX), toScreenY(textY));
         }
+        ctx.stroke();
+        return;
+      }
+      else if (entity.type === 'USER_IMAGE') {
+        // Kullanıcının yüklediği resim
+        // Koordinat kontrolü
+        if (entity.x === undefined || entity.y === undefined ||
+            isNaN(entity.x) || isNaN(entity.y) ||
+            !isFinite(entity.x) || !isFinite(entity.y)) return;
+        if (!entity.width || !entity.height) return;
+        
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const width = entity.width * scale;
+        const height = entity.height * scale;
+        
+        ctx.save();
+        
+        // Cache'den resmi al veya yükle
+        let img = loadedImagesRef.current.get(entity.id);
+        if (!img && entity.imageDataUrl) {
+          img = new Image();
+          img.src = entity.imageDataUrl;
+          loadedImagesRef.current.set(entity.id, img);
+        }
+        
+        if (img && img.complete) {
+          // Resmi çiz (Y ekseni ters - DXF koordinat sistemi)
+          ctx.drawImage(img, screenX, screenY - height, width, height);
+        } else {
+          // Resim yüklenene kadar placeholder
+          ctx.fillStyle = '#374151';
+          ctx.fillRect(screenX, screenY - height, width, height);
+          ctx.strokeStyle = '#60a5fa';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(screenX, screenY - height, width, height);
+          
+          const fontSize = Math.max(12, 10 * scale);
+          ctx.font = `${fontSize}px Arial`;
+          ctx.fillStyle = '#60a5fa';
+          ctx.textAlign = 'center';
+          ctx.fillText('⏳ Yükleniyor...', screenX + width / 2, screenY - height / 2);
+        }
+        
+        // Seçili ise çerçeve çiz
+        if (isSelected) {
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([5, 5]);
+          ctx.strokeRect(screenX - 2, screenY - height - 2, width + 4, height + 4);
+          ctx.setLineDash([]);
+        }
+        
+        ctx.restore();
+        return;
+      }
+      else if (entity.type === 'IMAGE') {
+        // IMAGE - resim placeholder'ı göster
+        // Koordinat kontrolü
+        if (entity.x === undefined || entity.y === undefined ||
+            isNaN(entity.x) || isNaN(entity.y) ||
+            !isFinite(entity.x) || !isFinite(entity.y)) return;
+            
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        
+        // U ve V vektörleriyle genişlik/yükseklik hesapla
+        let width = 100 * scale;
+        let height = 100 * scale;
+        
+        if (entity.uX !== undefined && entity.width !== undefined) {
+          width = Math.abs(entity.uX) * entity.width * scale;
+        }
+        if (entity.vY !== undefined && entity.height !== undefined) {
+          height = Math.abs(entity.vY) * entity.height * scale;
+        }
+        
+        // Placeholder dikdörtgen
+        ctx.save();
+        ctx.strokeStyle = isSelected ? '#fbbf24' : '#a855f7'; // Mor
+        ctx.lineWidth = Math.max(2 / scale, 1);
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(screenX, screenY - height, width, height);
+        ctx.setLineDash([]);
+        
+        // Resim ikonu çiz (X işareti)
+        ctx.beginPath();
+        ctx.moveTo(screenX, screenY - height);
+        ctx.lineTo(screenX + width, screenY);
+        ctx.moveTo(screenX + width, screenY - height);
+        ctx.lineTo(screenX, screenY);
+        ctx.stroke();
+        
+        // "IMAGE" yazısı
+        const fontSize = Math.max(12, 10 * scale);
+        ctx.font = `${fontSize}px Arial`;
+        ctx.fillStyle = isSelected ? '#fbbf24' : '#a855f7';
+        ctx.textAlign = 'center';
+        ctx.fillText('📷 IMAGE', screenX + width / 2, screenY - height / 2);
+        ctx.textAlign = 'left';
+        ctx.restore();
+        return;
+      }
+      else if (entity.type === 'VIEWPORT') {
+        // VIEWPORT - kesikli dikdörtgen
+        // Koordinat kontrolü
+        if (entity.x === undefined || entity.y === undefined ||
+            isNaN(entity.x) || isNaN(entity.y) ||
+            !isFinite(entity.x) || !isFinite(entity.y)) return;
+            
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const width = (entity.width || 100) * scale;
+        const height = (entity.height || 100) * scale;
+        
+        ctx.save();
+        ctx.strokeStyle = isSelected ? '#fbbf24' : '#06b6d4'; // Cyan
+        ctx.lineWidth = Math.max(1 / scale, 1);
+        ctx.setLineDash([10, 5]);
+        ctx.strokeRect(screenX - width / 2, screenY - height / 2, width, height);
+        ctx.setLineDash([]);
+        ctx.restore();
+        return; // stroke atla
+      }
+      else if (entity.type === 'OLE2FRAME') {
+        // OLE2FRAME - gömülü nesne placeholder'ı
+        // Koordinat kontrolü
+        if (entity.x === undefined || entity.y === undefined ||
+            isNaN(entity.x) || isNaN(entity.y) ||
+            !isFinite(entity.x) || !isFinite(entity.y)) return;
+            
+        const screenX1 = toScreenX(entity.x);
+        const screenY1 = toScreenY(entity.y);
+        const screenX2 = entity.x2 !== undefined ? toScreenX(entity.x2) : screenX1 + 100 * scale;
+        const screenY2 = entity.y2 !== undefined ? toScreenY(entity.y2) : screenY1 + 100 * scale;
+        
+        const rectX = Math.min(screenX1, screenX2);
+        const rectY = Math.min(screenY1, screenY2);
+        const width = Math.abs(screenX2 - screenX1);
+        const height = Math.abs(screenY2 - screenY1);
+        
+        ctx.save();
+        ctx.strokeStyle = isSelected ? '#fbbf24' : '#f59e0b'; // Amber
+        ctx.fillStyle = '#f59e0b20';
+        ctx.lineWidth = Math.max(2 / scale, 1);
+        ctx.setLineDash([8, 4]);
+        ctx.strokeRect(rectX, rectY, width, height);
+        ctx.fillRect(rectX, rectY, width, height);
+        ctx.setLineDash([]);
+        
+        // "OLE" yazısı
+        const fontSize = Math.max(12, 10 * scale);
+        ctx.font = `${fontSize}px Arial`;
+        ctx.fillStyle = isSelected ? '#fbbf24' : '#f59e0b';
+        ctx.textAlign = 'center';
+        ctx.fillText('📎 OLE Object', rectX + width / 2, rectY + height / 2);
+        ctx.textAlign = 'left';
+        ctx.restore();
+        return;
+      }
+      else if (entity.type === 'WIPEOUT') {
+        // WIPEOUT - beyaz alan (maskeleme)
+        if (!entity.vertices || entity.vertices.length < 3) return;
+        
+        // Geçerli vertices filtrele
+        const validVerts = entity.vertices.filter(v => 
+          v.x !== undefined && v.y !== undefined &&
+          !isNaN(v.x) && !isNaN(v.y) &&
+          isFinite(v.x) && isFinite(v.y)
+        );
+        if (validVerts.length < 3) return;
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(toScreenX(validVerts[0].x), toScreenY(validVerts[0].y));
+        for (let i = 1; i < validVerts.length; i++) {
+          ctx.lineTo(toScreenX(validVerts[i].x), toScreenY(validVerts[i].y));
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#1e1e1e'; // Arka plan rengi ile aynı
+        ctx.fill();
+        if (isSelected) {
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        ctx.restore();
+        return;
+      }
+      else if (entity.type === 'RTEXT') {
+        // RTEXT - referanslı metin
+        // Koordinat kontrolü
+        if (entity.x === undefined || entity.y === undefined ||
+            isNaN(entity.x) || isNaN(entity.y) ||
+            !isFinite(entity.x) || !isFinite(entity.y)) return;
+            
+        const screenX = toScreenX(entity.x);
+        const screenY = toScreenY(entity.y);
+        const fontSize = (entity.height || 2.5) * scale;
+        
+        if (fontSize < 1) return;
+        
+        ctx.save();
+        ctx.font = `${fontSize}px Arial, sans-serif`;
+        ctx.fillStyle = isSelected ? '#fbbf24' : '#22c55e'; // Yeşil
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(entity.text || 'RTEXT', screenX, screenY);
+        ctx.restore();
+        return;
+      }
+      else {
+        // Tanınmayan entity tipi - boş path çizme
+        return;
       }
       
       ctx.stroke();
@@ -1780,29 +2663,42 @@ const App = () => {
 
   }, [entities, scale, offset, hiddenLayers, activeTool, currentPolyline, mouseWorldPos, activeSnap, selectedEntities, selectionRect, selectionMode, currentDrawingState, sidebarOpen, gridVisible]);
 
+  // Wheel event listener (passive: false ile) - zoom için preventDefault gerekli
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const wheelHandler = (e) => {
+      e.preventDefault();
+      const zoomSensitivity = 0.001;
+      const zoomFactor = 1 - e.deltaY * zoomSensitivity;
+      
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      const newScale = scale * zoomFactor;
+      
+      if (newScale < 0.001 || newScale > 1000) return;
+
+      const newOffsetX = mouseX - (mouseX - offset.x) * zoomFactor;
+      const newOffsetY = mouseY - (mouseY - offset.y) * zoomFactor;
+
+      setScale(newScale);
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    };
+    
+    // passive: false ile ekle - bu preventDefault'un çalışmasını sağlar
+    canvas.addEventListener('wheel', wheelHandler, { passive: false });
+    
+    return () => {
+      canvas.removeEventListener('wheel', wheelHandler);
+    };
+  }, [scale, offset]);
 
 
   // --- MOUSE HANDLERS ---
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const zoomSensitivity = 0.001;
-    const zoomFactor = 1 - e.deltaY * zoomSensitivity;
-    
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    
-    const newScale = scale * zoomFactor;
-    
-    if (newScale < 0.001 || newScale > 1000) return;
-
-    const newOffsetX = mouseX - (mouseX - offset.x) * zoomFactor;
-    const newOffsetY = mouseY - (mouseY - offset.y) * zoomFactor;
-
-    setScale(newScale);
-    setOffset({ x: newOffsetX, y: newOffsetY });
-  };
-
+  
   // Mouse/Touch koordinatlarını normalize et
   const getEventCoordinates = (e) => {
     let clientX, clientY;
@@ -2148,13 +3044,29 @@ const App = () => {
         return;
       }
       
-      // ESC tuşu ile aktif çizimi iptal et
+      // ESC tuşu ile aktif çizimi veya seçimi iptal et
       if (e.key === 'Escape') {
         e.preventDefault();
+        
+        // Önce aktif çizim varsa iptal et
         if (activeTool !== 'select' || currentPolyline.length > 0 || currentDrawingState) {
           cancelActiveDrawing();
+          return;
         }
-        return;
+        
+        // Seçili entity varsa seçimi temizle
+        if (selectedEntities.size > 0) {
+          setSelectedEntities(new Set());
+          return;
+        }
+        
+        // Seçim kutusu çiziliyorsa iptal et
+        if (isSelectionDragging) {
+          setIsSelectionDragging(false);
+          setSelectionRect(null);
+          setSelectionStart(null);
+          return;
+        }
       }
       
       // AutoCAD Fonksiyon Tuşları
@@ -2202,9 +3114,8 @@ const App = () => {
           break;
           
         case 'F12':
-          e.preventDefault();
-          // F12: Dynamic input (gelecekte eklenebilir)
-          console.log('F12: Dynamic input (özellik gelecekte eklenecek)');
+          // F12: Tarayıcı DevTools - engellemiyoruz (Console erişimi için)
+          // e.preventDefault(); // DevTools açılabilsin
           break;
       }
       
@@ -2350,7 +3261,7 @@ const App = () => {
                 addToHistory(remainingEntities);
               }
             }}
-            disabled={selectedEntities.size === 0}
+            disabled={selectedEntities.size === 0 || viewMode}
           />
           
           <ToolButton icon={Maximize} title="Ekrana Sığdır (Fit to Screen)" onClick={() => fitToScreen()} />
@@ -2361,9 +3272,11 @@ const App = () => {
           {/* Polyline Çizim Aracı (Faz 2.1) */}
           <ToolButton 
               icon={PenTool} 
-              title="Polyline Çiz (Sağ Tık İptal, Çift Tık Bitir)" 
+              title={viewMode ? "Görüntüleme modunda çizim yapılamaz" : "Polyline Çiz (Sağ Tık İptal, Çift Tık Bitir)"} 
               active={activeTool === 'polyline'} 
+              disabled={viewMode}
               onClick={() => { 
+                  if (viewMode) return;
                   if (activeTool === 'polyline') {
                       cancelActiveDrawing();
                   } else {
@@ -2376,17 +3289,19 @@ const App = () => {
           {/* Rectangle Çizim Aracı (Faz 2.1) */}
           <ToolButton 
               icon={Square} 
-              title="Dikdörtgen Çiz (2 Tıkla: Başlangıç/Bitiş)" 
+              title={viewMode ? "Görüntüleme modunda çizim yapılamaz" : "Dikdörtgen Çiz (2 Tıkla: Başlangıç/Bitiş)"} 
               active={activeTool === 'rectangle'} 
-              onClick={() => { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+              disabled={viewMode}
+              onClick={() => { if (!viewMode) { setActiveTool('rectangle'); setCurrentDrawingState(null); setCurrentPolyline([]); } }} 
           />
 
           {/* Circle Çizim Aracı (Faz 2.1) */}
           <ToolButton 
               icon={Circle} 
-              title="Daire Çiz (2 Tıkla: Merkez/Yarıçap)" 
+              title={viewMode ? "Görüntüleme modunda çizim yapılamaz" : "Daire Çiz (2 Tıkla: Merkez/Yarıçap)"} 
               active={activeTool === 'circle'} 
-              onClick={() => { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); }} 
+              disabled={viewMode}
+              onClick={() => { if (!viewMode) { setActiveTool('circle'); setCurrentDrawingState(null); setCurrentPolyline([]); } }} 
           />
 
           {/* Polyline'ı Bitir Butonu */}
@@ -2394,7 +3309,7 @@ const App = () => {
               <button 
                   title="Çizimi Bitir (Çift Tıklama Veya Bu Buton)"
                   onClick={finishPolyline}
-                  className="p-3 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  className="p-3 rounded-xl text-white animate-pulse shadow-lg touch-manipulation transition-all duration-300 min-w-11 min-h-11 flex items-center justify-center"
                   style={{background: 'linear-gradient(135deg, #16a34a 0%, #059669 100%)', boxShadow: '0 10px 15px -3px rgba(34, 197, 94, 0.3)'}}
               >
                   <PlusCircle size={20} />
@@ -2402,6 +3317,14 @@ const App = () => {
           )}
           
           <div className="mt-auto flex flex-col gap-2">
+               {/* View/Edit Mode Toggle */}
+               <ToolButton 
+                  icon={viewMode ? Eye : EyeOff} 
+                  title={viewMode ? "Görüntüleme Modu (Tıkla: Düzenleme)" : "Düzenleme Modu (Tıkla: Görüntüleme)"} 
+                  active={viewMode} 
+                  onClick={() => setViewMode(prev => !prev)} 
+                />
+               
                {/* Grid Toggle (F7) */}
                <ToolButton 
                   icon={Grid3x3} 
@@ -2419,7 +3342,7 @@ const App = () => {
                 />
                
                {/* DXF/DWG Dosya Yükleme */}
-               <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl min-w-[44px] min-h-[44px]" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="CAD Dosyası Yükle (DXF/DWG)">
+               <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl min-w-11 min-h-11" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="CAD Dosyası Yükle (DXF/DWG)">
                   <Upload size={20} />
                   <input 
                     type="file" 
@@ -2427,6 +3350,19 @@ const App = () => {
                     className="hidden" 
                     onChange={handleFileUpload} 
                     onClick={(e) => { e.target.value = null; }} 
+                  />
+               </label>
+               
+               {/* Resim Ekleme */}
+               <label className={`cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl min-w-11 min-h-11 ${viewMode ? 'opacity-40 cursor-not-allowed' : ''}`} style={{background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'}} title={viewMode ? "Görüntüleme modunda resim eklenemez" : "Resim Ekle (PNG, JPEG, GIF, WebP, SVG)"}>
+                  <span className="text-lg">🖼️</span>
+                  <input 
+                    type="file" 
+                    accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" 
+                    className="hidden" 
+                    onChange={handleImageUpload} 
+                    onClick={(e) => { if (viewMode) { e.preventDefault(); return; } e.target.value = null; }} 
+                    disabled={viewMode}
                   />
                </label>
           </div>
@@ -2443,6 +3379,8 @@ const App = () => {
         {/* Desktop info bar */}
         <div className="hidden md:block absolute top-4 left-4 bg-gray-800/90 backdrop-blur-md px-4 py-2 rounded-lg border border-gray-700/50 text-xs text-gray-300 pointer-events-none select-none z-10 shadow-xl">
           <span>Ent: {entities.length + (currentPolyline.length > 0 ? 1 : 0)} | Seçili: {selectedEntities.size} | Zoom: {scale.toExponential(2)} | World X: {mouseWorldPos.x.toFixed(2)} Y: {mouseWorldPos.y.toFixed(2)}</span>
+          {viewMode && <span className="ml-3 font-bold text-cyan-400">| 👁 GÖRÜNTÜLEME</span>}
+          {!viewMode && <span className="ml-3 font-bold text-green-400">| ✏️ DÜZENLEME</span>}
           {!gridVisible && <span className="ml-3 font-semibold text-gray-500">| GRID:OFF</span>}
           {!snapEnabled && <span className="ml-3 font-semibold text-gray-500">| SNAP:OFF</span>}
           {activeSnap && snapEnabled && <span className="text-yellow-400 ml-3 font-semibold">| {activeSnap.type}</span>}
@@ -2454,7 +3392,6 @@ const App = () => {
         
         <canvas
           ref={canvasRef}
-          onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -2696,7 +3633,7 @@ const App = () => {
             {/* Yakınlaştır */}
             <button 
               onClick={() => setScale(s => s * 1.5)}
-              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-[48px]"
+              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-12"
               title="Yakınlaştır"
             >
               <ZoomIn size={22} />
@@ -2705,7 +3642,7 @@ const App = () => {
             {/* Uzaklaştır */}
             <button 
               onClick={() => setScale(s => s / 1.5)}
-              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-[48px]"
+              className="p-3 bg-gray-700/80 rounded-xl text-gray-200 active:bg-gray-600 touch-manipulation min-w-12"
               title="Uzaklaştır"
             >
               <ZoomOut size={22} />
@@ -2781,13 +3718,25 @@ const App = () => {
               />
               
               {/* Upload */}
-              <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-[44px] min-h-[44px] active:scale-95" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
+              <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-11 min-h-11 active:scale-95" style={{background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'}} title="Dosya Yükle">
                 <Upload size={20} />
                 <input 
                   type="file" 
                   accept=".dxf,.dwg" 
                   className="hidden" 
                   onChange={handleFileUpload} 
+                  onClick={(e) => { e.target.value = null; }} 
+                />
+              </label>
+              
+              {/* Resim Ekle */}
+              <label className="cursor-pointer p-3 rounded-xl text-white flex items-center justify-center touch-manipulation shadow-lg min-w-11 min-h-11 active:scale-95" style={{background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'}} title="Resim Ekle">
+                <span className="text-lg">🖼️</span>
+                <input 
+                  type="file" 
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" 
+                  className="hidden" 
+                  onChange={handleImageUpload} 
                   onClick={(e) => { e.target.value = null; }} 
                 />
               </label>

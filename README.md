@@ -4,6 +4,12 @@ Web tabanlı CAD çizim görüntüleyici ve düzenleyici. AutoCAD DXF dosyaları
 
 ![Version](https://img.shields.io/badge/version-1.0.0-green) ![React](https://img.shields.io/badge/React-18.x-blue) ![Vite](https://img.shields.io/badge/Vite-7.x-purple) ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.x-cyan)
 
+## 📢 Son Güncellemeler (Revizyon)
+- **Hata Düzeltmesi:** DXF dosyalarında 0,0 noktasından (origin) çizim elemanlarına uzanan hatalı çizgiler (spurious lines) giderildi.
+- **İyileştirme:** LINE, POLYLINE, SPLINE, DIMENSION ve LEADER nesneleri için 0,0 noktası filtrelemesi eklendi.
+- **İyileştirme:** Blok (INSERT) içindeki DIMENSION nesnelerinin konumlandırması düzeltildi.
+- **UX:** ESC tuşu ile seçim iptali ve çizim iptali iyileştirildi.
+
 ## ✨ Özellikler
 
 ### 📁 Dosya İşlemleri
